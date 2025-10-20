@@ -191,3 +191,152 @@ func (db *DB) GetResponse(id string) (*Response, error) {
 
 	return &resp, nil
 }
+
+// GetResponseByRequestID retrieves the first response for a request
+func (db *DB) GetResponseByRequestID(requestID string) (*Response, error) {
+	db.mu.RLock()
+	defer db.mu.RUnlock()
+
+	row := db.conn.QueryRow(
+		"SELECT id, request_id, status_code, headers, body, duration_ms, created_at FROM responses WHERE request_id = ? LIMIT 1",
+		requestID,
+	)
+
+	var resp Response
+	var headerJSON string
+
+	err := row.Scan(&resp.ID, &resp.RequestID, &resp.StatusCode, &headerJSON, &resp.Body, &resp.DurationMs, &resp.CreatedAt)
+	if err != nil {
+		if err == sql.ErrNoRows {
+			return nil, fmt.Errorf("response not found")
+		}
+		return nil, fmt.Errorf("failed to get response: %w", err)
+	}
+
+	if headerJSON != "" {
+		headers, err := headersFromJSON(headerJSON)
+		if err != nil {
+			return nil, fmt.Errorf("failed to unmarshal headers: %w", err)
+		}
+		resp.Headers = headers
+	}
+
+	return &resp, nil
+}
+
+// ListRequestsParams contains filter parameters for listing requests
+type ListRequestsParams struct {
+	Provider    string
+	PathPattern string
+	DateFrom    time.Time
+	DateTo      time.Time
+	Limit       int
+	Offset      int
+}
+
+// ListRequests returns a list of requests with optional filtering
+func (db *DB) ListRequests(params *ListRequestsParams) ([]*Request, error) {
+	db.mu.RLock()
+	defer db.mu.RUnlock()
+
+	query := "SELECT id, provider, endpoint, method, headers, body, created_at FROM requests WHERE 1=1"
+	args := []interface{}{}
+
+	if params.Provider != "" {
+		query += " AND provider = ?"
+		args = append(args, params.Provider)
+	}
+
+	if params.PathPattern != "" {
+		query += " AND endpoint LIKE ?"
+		args = append(args, "%"+params.PathPattern+"%")
+	}
+
+	if !params.DateFrom.IsZero() {
+		query += " AND created_at >= ?"
+		args = append(args, params.DateFrom)
+	}
+
+	if !params.DateTo.IsZero() {
+		query += " AND created_at <= ?"
+		args = append(args, params.DateTo)
+	}
+
+	query += " ORDER BY created_at DESC"
+
+	if params.Limit > 0 {
+		query += " LIMIT ?"
+		args = append(args, params.Limit)
+	}
+
+	if params.Offset > 0 {
+		query += " OFFSET ?"
+		args = append(args, params.Offset)
+	}
+
+	rows, err := db.conn.Query(query, args...)
+	if err != nil {
+		return nil, fmt.Errorf("failed to query requests: %w", err)
+	}
+	defer rows.Close()
+
+	var requests []*Request
+
+	for rows.Next() {
+		var req Request
+		var headerJSON string
+
+		err := rows.Scan(&req.ID, &req.Provider, &req.Endpoint, &req.Method, &headerJSON, &req.Body, &req.CreatedAt)
+		if err != nil {
+			return nil, fmt.Errorf("failed to scan request: %w", err)
+		}
+
+		if headerJSON != "" {
+			headers, err := headersFromJSON(headerJSON)
+			if err != nil {
+				return nil, fmt.Errorf("failed to unmarshal headers: %w", err)
+			}
+			req.Headers = headers
+		}
+
+		requests = append(requests, &req)
+	}
+
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("error iterating requests: %w", err)
+	}
+
+	return requests, nil
+}
+
+// GetBinaryFilesByRequestID retrieves all binary files for a request
+func (db *DB) GetBinaryFilesByRequestID(requestID string) ([]*BinaryFile, error) {
+	db.mu.RLock()
+	defer db.mu.RUnlock()
+
+	rows, err := db.conn.Query(
+		"SELECT id, request_id, response_id, file_path, content_type, size, created_at FROM binary_files WHERE request_id = ? ORDER BY created_at",
+		requestID,
+	)
+	if err != nil {
+		return nil, fmt.Errorf("failed to query binary files: %w", err)
+	}
+	defer rows.Close()
+
+	var files []*BinaryFile
+
+	for rows.Next() {
+		var file BinaryFile
+		err := rows.Scan(&file.ID, &file.RequestID, &file.ResponseID, &file.FilePath, &file.ContentType, &file.Size, &file.CreatedAt)
+		if err != nil {
+			return nil, fmt.Errorf("failed to scan binary file: %w", err)
+		}
+		files = append(files, &file)
+	}
+
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("error iterating binary files: %w", err)
+	}
+
+	return files, nil
+}

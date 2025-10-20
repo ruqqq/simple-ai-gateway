@@ -1,0 +1,193 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>AI Gateway UI</title>
+    <link rel="stylesheet" href="/ui/styles.css">
+</head>
+<body>
+    <div class="container">
+        <!-- Header -->
+        <header class="header">
+            <h1>AI Gateway Dashboard</h1>
+            <div class="connection-status">
+                <span id="status-indicator" class="status-disconnected"></span>
+                <span id="status-text">Connecting...</span>
+            </div>
+        </header>
+
+        <div class="main-content">
+            <!-- Sidebar: Filters -->
+            <aside class="sidebar">
+                <div class="filters">
+                    <h2>Filters</h2>
+
+                    <!-- Provider Filter -->
+                    <div class="filter-group">
+                        <label for="provider-filter">Provider</label>
+                        <select id="provider-filter">
+                            <option value="">All Providers</option>
+                            <option value="openai">OpenAI</option>
+                            <option value="replicate">Replicate</option>
+                            <option value="anthropic">Anthropic</option>
+                        </select>
+                    </div>
+
+                    <!-- Path Filter -->
+                    <div class="filter-group">
+                        <label for="path-filter">Endpoint Pattern</label>
+                        <input type="text" id="path-filter" placeholder="e.g., /chat/completions">
+                    </div>
+
+                    <!-- Date Range Filter -->
+                    <div class="filter-group">
+                        <label for="date-from-filter">From Date</label>
+                        <input type="datetime-local" id="date-from-filter">
+                    </div>
+
+                    <div class="filter-group">
+                        <label for="date-to-filter">To Date</label>
+                        <input type="datetime-local" id="date-to-filter">
+                    </div>
+
+                    <!-- Action Buttons -->
+                    <div class="filter-actions">
+                        <button id="apply-filters-btn" class="btn btn-primary">Apply Filters</button>
+                        <button id="clear-filters-btn" class="btn btn-secondary">Clear</button>
+                    </div>
+                </div>
+            </aside>
+
+            <!-- Main Content Area -->
+            <div class="content-area">
+                <!-- Requests List -->
+                <section class="requests-list">
+                    <h2>Requests</h2>
+                    <div id="requests-container" class="requests-container">
+                        <div class="loading">Loading requests...</div>
+                    </div>
+                </section>
+
+                <!-- Request Details -->
+                <section class="request-details">
+                    <h2>Request Details</h2>
+                    <div id="details-container" class="details-container">
+                        <div class="no-selection">Select a request to view details</div>
+                    </div>
+                </section>
+            </div>
+        </div>
+    </div>
+
+    <!-- Templates -->
+    <template id="request-item-template">
+        <div class="request-item" data-id="">
+            <div class="request-header">
+                <span class="provider-badge"></span>
+                <span class="method-badge"></span>
+                <span class="status-badge"></span>
+            </div>
+            <div class="request-endpoint"></div>
+            <div class="request-timestamp"></div>
+        </div>
+    </template>
+
+    <template id="details-template">
+        <div class="details-content">
+            <!-- Tabs -->
+            <div class="tabs">
+                <button class="tab-btn active" data-tab="request">Request</button>
+                <button class="tab-btn" data-tab="response">Response</button>
+                <button class="tab-btn" data-tab="headers">Headers</button>
+                <button class="tab-btn" data-tab="files">Binary Files</button>
+            </div>
+
+            <!-- Tab Contents -->
+            <div class="tab-content">
+                <!-- Request Tab -->
+                <div class="tab-pane active" data-tab="request">
+                    <div class="request-info">
+                        <div class="info-group">
+                            <label>Provider</label>
+                            <div id="detail-provider" class="info-value"></div>
+                        </div>
+                        <div class="info-group">
+                            <label>Endpoint</label>
+                            <div id="detail-endpoint" class="info-value"></div>
+                        </div>
+                        <div class="info-group">
+                            <label>Method</label>
+                            <div id="detail-method" class="info-value"></div>
+                        </div>
+                        <div class="info-group">
+                            <label>Request Body</label>
+                            <pre id="detail-request-body" class="code-block"><code></code></pre>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Response Tab -->
+                <div class="tab-pane" data-tab="response">
+                    <div class="response-info">
+                        <div class="info-group">
+                            <label>Status Code</label>
+                            <div id="detail-status-code" class="info-value"></div>
+                        </div>
+                        <div class="info-group">
+                            <label>Duration (ms)</label>
+                            <div id="detail-duration" class="info-value"></div>
+                        </div>
+                        <div class="info-group">
+                            <label>Response Body</label>
+                            <div id="detail-response-body-container" class="response-body-container">
+                                <pre id="detail-response-body" class="code-block"><code></code></pre>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Headers Tab -->
+                <div class="tab-pane" data-tab="headers">
+                    <div class="headers-info">
+                        <div class="info-group">
+                            <label>Request Headers</label>
+                            <pre id="detail-request-headers" class="code-block"><code></code></pre>
+                        </div>
+                        <div class="info-group">
+                            <label>Response Headers</label>
+                            <pre id="detail-response-headers" class="code-block"><code></code></pre>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Files Tab -->
+                <div class="tab-pane" data-tab="files">
+                    <div class="files-info">
+                        <div id="detail-files-container" class="files-container">
+                            <p class="no-data">No binary files</p>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </template>
+
+    <template id="file-item-template">
+        <div class="file-item">
+            <div class="file-info">
+                <div class="file-name"></div>
+                <div class="file-meta">
+                    <span class="file-type"></span>
+                    <span class="file-size"></span>
+                </div>
+            </div>
+            <div class="file-preview">
+                <!-- Preview will be inserted here -->
+            </div>
+        </div>
+    </template>
+
+    <script src="/ui/app.js"></script>
+</body>
+</html>

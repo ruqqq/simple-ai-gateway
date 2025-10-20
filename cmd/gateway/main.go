@@ -8,11 +8,13 @@ import (
 	"syscall"
 
 	"github.com/go-chi/chi/v5"
+	"github.com/ruqqq/simple-ai-gateway/internal/api"
 	"github.com/ruqqq/simple-ai-gateway/internal/config"
 	"github.com/ruqqq/simple-ai-gateway/internal/database"
 	"github.com/ruqqq/simple-ai-gateway/internal/provider"
 	"github.com/ruqqq/simple-ai-gateway/internal/proxy"
 	"github.com/ruqqq/simple-ai-gateway/internal/storage"
+	"github.com/ruqqq/simple-ai-gateway/internal/ui"
 )
 
 func main() {
@@ -49,8 +51,15 @@ func main() {
 		provider.NewReplicateProvider(),
 	}
 
+	// Initialize SSE broadcaster
+	broadcaster := api.NewSSEBroadcaster()
+	defer broadcaster.Close()
+
+	// Create API handler
+	apiHandler := api.NewHandler(db, fs, broadcaster)
+
 	// Create proxy handler
-	proxyHandler := proxy.New(db, fs, providers)
+	proxyHandler := proxy.New(db, fs, providers, broadcaster, apiHandler)
 
 	// Create router
 	r := chi.NewRouter()
@@ -58,8 +67,25 @@ func main() {
 	// Add middleware
 	r.Use(loggingMiddleware)
 
-	// Proxy all requests
-	r.HandleFunc("/*", proxyHandler.Handle)
+	// API routes
+	r.Route("/api", func(r chi.Router) {
+		r.Get("/requests", apiHandler.ListRequests)
+		r.Get("/requests/{id}", apiHandler.GetRequest)
+		r.Get("/files/*", apiHandler.GetFile)
+		r.Get("/events", apiHandler.GetEvents)
+		r.Get("/stats", apiHandler.GetStats)
+	})
+
+	// UI routes
+	uiFS, err := ui.NewFileServer()
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Failed to load UI files: %v\n", err)
+		os.Exit(1)
+	}
+	r.Handle("/ui/*", http.StripPrefix("/ui", uiFS))
+	r.Get("/", func(w http.ResponseWriter, r *http.Request) {
+		http.Redirect(w, r, "/ui/", http.StatusMovedPermanently)
+	})
 
 	// Health check endpoint
 	r.HandleFunc("/health", func(w http.ResponseWriter, r *http.Request) {
@@ -67,6 +93,9 @@ func main() {
 		w.WriteHeader(http.StatusOK)
 		fmt.Fprintf(w, `{"status":"ok"}`)
 	})
+
+	// Proxy all other requests
+	r.HandleFunc("/*", proxyHandler.Handle)
 
 	// Start server in a goroutine
 	addr := fmt.Sprintf(":%d", cfg.Port)
@@ -99,7 +128,7 @@ func main() {
 // loggingMiddleware logs incoming requests
 func loggingMiddleware(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		fmt.Printf("%s %s %s\n", r.Method, r.RequestURI, r.RemoteAddr)
+		fmt.Printf("[IN] %s %s\n", r.Method, r.RequestURI)
 		next.ServeHTTP(w, r)
 	})
 }

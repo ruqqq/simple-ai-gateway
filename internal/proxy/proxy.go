@@ -11,28 +11,33 @@ import (
 	"time"
 
 	"github.com/andybalholm/brotli"
+	"github.com/ruqqq/simple-ai-gateway/internal/api"
 	"github.com/ruqqq/simple-ai-gateway/internal/database"
 	"github.com/ruqqq/simple-ai-gateway/internal/provider"
 	"github.com/ruqqq/simple-ai-gateway/internal/storage"
 )
 
 type ProxyHandler struct {
-	db        *database.DB
-	storage   *storage.FileStorage
-	providers map[string]provider.Provider
+	db          *database.DB
+	storage     *storage.FileStorage
+	providers   map[string]provider.Provider
+	broadcaster *api.SSEBroadcaster
+	apiHandler  *api.Handler
 }
 
 // New creates a new proxy handler
-func New(db *database.DB, fs *storage.FileStorage, providers []provider.Provider) *ProxyHandler {
+func New(db *database.DB, fs *storage.FileStorage, providers []provider.Provider, broadcaster *api.SSEBroadcaster, apiHandler *api.Handler) *ProxyHandler {
 	providerMap := make(map[string]provider.Provider)
 	for _, p := range providers {
 		providerMap[p.Name()] = p
 	}
 
 	return &ProxyHandler{
-		db:        db,
-		storage:   fs,
-		providers: providerMap,
+		db:          db,
+		storage:     fs,
+		providers:   providerMap,
+		broadcaster: broadcaster,
+		apiHandler:  apiHandler,
 	}
 }
 
@@ -55,10 +60,13 @@ func (ph *ProxyHandler) Handle(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Log the incoming request
-	requestID, err := ph.logRequest(selectedProvider, r)
+	requestID, reqData, err := ph.logRequest(selectedProvider, r)
 	if err != nil {
 		fmt.Printf("Warning: failed to log request: %v\n", err)
 		// Continue anyway, logging failure shouldn't block proxying
+	} else if reqData != nil {
+		// Emit request created event asynchronously
+		go ph.apiHandler.BroadcastRequestCreated(reqData)
 	}
 
 	// Check if this is a streaming request
@@ -121,7 +129,7 @@ func decompressBody(body []byte, contentEncoding string) ([]byte, error) {
 }
 
 // logRequest logs the incoming request to the database
-func (ph *ProxyHandler) logRequest(prov provider.Provider, r *http.Request) (string, error) {
+func (ph *ProxyHandler) logRequest(prov provider.Provider, r *http.Request) (string, *database.Request, error) {
 	// Read body
 	bodyBytes, _ := io.ReadAll(r.Body)
 	r.Body = io.NopCloser(bytes.NewBuffer(bodyBytes))
@@ -142,7 +150,18 @@ func (ph *ProxyHandler) logRequest(prov provider.Provider, r *http.Request) (str
 		Body:     string(bodyBytes),
 	}
 
-	return ph.db.StoreRequest(input)
+	id, err := ph.db.StoreRequest(input)
+	if err != nil {
+		return "", nil, err
+	}
+
+	// Retrieve the stored request to get its creation time
+	storedReq, err := ph.db.GetRequest(id)
+	if err != nil {
+		return id, nil, err
+	}
+
+	return id, storedReq, nil
 }
 
 // prepareProxyRequest prepares the request to be sent to the provider
@@ -203,6 +222,9 @@ func (ph *ProxyHandler) handleRegularResponse(
 	requestID string,
 	start time.Time,
 ) {
+	// Log outgoing request
+	fmt.Printf("[OUT] → %s %s %s\n", prov.Name(), proxyReq.Method, proxyReq.URL.String())
+
 	client := &http.Client{}
 	resp, err := client.Do(proxyReq)
 	if err != nil {
@@ -214,6 +236,9 @@ func (ph *ProxyHandler) handleRegularResponse(
 	// Read response body (may be compressed)
 	respBody, _ := io.ReadAll(resp.Body)
 	duration := int(time.Since(start).Milliseconds())
+
+	// Log response status
+	fmt.Printf("[RESP] ← %s %d (%dms)\n", prov.Name(), resp.StatusCode, duration)
 
 	// Decompress body for storage (keep original for client)
 	contentEncoding := resp.Header.Get("Content-Encoding")
@@ -263,14 +288,22 @@ func (ph *ProxyHandler) handleRegularResponse(
 	responseID, err := ph.db.StoreResponse(respInput)
 	if err != nil {
 		fmt.Printf("Warning: failed to log response: %v\n", err)
-	}
-
-	// Store binary file reference if applicable
-	if binaryFilePath != "" && responseID != "" {
-		_, err := ph.db.StoreBinaryFile("", responseID, binaryFilePath, contentType, binaryFileSize)
-		if err != nil {
-			fmt.Printf("Warning: failed to store binary file reference: %v\n", err)
+	} else {
+		// Update binary file reference with request ID
+		if binaryFilePath != "" {
+			_, err := ph.db.StoreBinaryFile(requestID, responseID, binaryFilePath, contentType, binaryFileSize)
+			if err != nil {
+				fmt.Printf("Warning: failed to store binary file reference: %v\n", err)
+			}
 		}
+
+		// Emit response created event asynchronously
+		go func() {
+			storedResp, err := ph.db.GetResponse(responseID)
+			if err == nil && storedResp != nil {
+				ph.apiHandler.BroadcastResponseCreated(storedResp)
+			}
+		}()
 	}
 
 	// Write response headers
@@ -293,6 +326,9 @@ func (ph *ProxyHandler) handleStreamingResponse(
 	requestID string,
 ) {
 	start := time.Now()
+
+	// Log outgoing request
+	fmt.Printf("[OUT] → %s %s %s\n", prov.Name(), proxyReq.Method, proxyReq.URL.String())
 
 	client := &http.Client{}
 	resp, err := client.Do(proxyReq)
@@ -336,6 +372,9 @@ func (ph *ProxyHandler) handleStreamingResponse(
 	// Log the response
 	duration := int(time.Since(start).Milliseconds())
 
+	// Log response status
+	fmt.Printf("[RESP] ← %s %d (%dms)\n", prov.Name(), resp.StatusCode, duration)
+
 	// Decompress body for storage (keep original for client)
 	contentEncoding := resp.Header.Get("Content-Encoding")
 	storedBody := bufferedResponse.String()
@@ -363,8 +402,16 @@ func (ph *ProxyHandler) handleStreamingResponse(
 		DurationMs: duration,
 	}
 
-	_, err = ph.db.StoreResponse(respInput)
+	responseID, err := ph.db.StoreResponse(respInput)
 	if err != nil {
 		fmt.Printf("Warning: failed to log streaming response: %v\n", err)
+	} else {
+		// Emit response created event asynchronously
+		go func() {
+			storedResp, err := ph.db.GetResponse(responseID)
+			if err == nil && storedResp != nil {
+				ph.apiHandler.BroadcastResponseCreated(storedResp)
+			}
+		}()
 	}
 }
