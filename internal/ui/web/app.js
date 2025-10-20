@@ -748,7 +748,7 @@ function extractOpenAIImages(data, source, mediaItems) {
                 msg.content.forEach((item, itemIdx) => {
                     if (item.type === 'image_url' && item.image_url?.url) {
                         const url = item.image_url.url;
-                        const match = url.match(/^data:([^;]+);base64,(.+)$/);
+                        const match = url.match(/^data:([^;]*);base64,(.+)$/);
                         if (match) {
                             addMediaItem(mediaItems, match[2], match[1], `messages[${msgIdx}].content[${itemIdx}].image_url.url`, source);
                         }
@@ -765,7 +765,7 @@ function extractOpenAIImages(data, source, mediaItems) {
                 msg.content.forEach((item, itemIdx) => {
                     if (item.type === 'input_image' && item.image_url) {
                         const url = item.image_url;
-                        const match = url.match(/^data:([^;]+);base64,(.+)$/);
+                        const match = url.match(/^data:([^;]*);base64,(.+)$/);
                         if (match) {
                             addMediaItem(mediaItems, match[2], match[1], `input[${msgIdx}].content[${itemIdx}].image_url`, source);
                         }
@@ -780,7 +780,7 @@ function extractOpenAIImages(data, source, mediaItems) {
         data.output.forEach((item, idx) => {
             if (item.type === 'image_generation_call' && item.result && typeof item.result === 'string') {
                 const result = item.result;
-                const match = result.match(/^data:([^;]+);base64,(.+)$/);
+                const match = result.match(/^data:([^;]*);base64,(.+)$/);
                 if (match) {
                     addMediaItem(mediaItems, match[2], match[1], `output[${idx}].result`, source);
                 } else if (result.startsWith('iVBOR') || result.startsWith('/9j/')) {
@@ -803,8 +803,8 @@ function extractReplicateImages(data, source, mediaItems) {
     inputFields.forEach(fieldName => {
         const inputImage = data.input?.[fieldName];
         if (inputImage && typeof inputImage === 'string') {
-            // Check for data URI
-            const dataMatch = inputImage.match(/^data:([^;]+);base64,(.+)$/);
+            // Check for data URI (media type is optional - make it handle malformed data URIs like "data:;base64,...")
+            const dataMatch = inputImage.match(/^data:([^;]*);base64,(.+)$/);
             if (dataMatch) {
                 addMediaItem(mediaItems, dataMatch[2], dataMatch[1], `input.${fieldName}`, source);
             } else if (inputImage.match(/^https?:\/\/.+\.(png|jpg|jpeg|gif|webp)$/i)) {
@@ -821,8 +821,8 @@ function extractReplicateImages(data, source, mediaItems) {
     if (Array.isArray(data.input?.input_images)) {
         data.input.input_images.forEach((inputImage, idx) => {
             if (inputImage && typeof inputImage === 'string') {
-                // Check for data URI
-                const dataMatch = inputImage.match(/^data:([^;]+);base64,(.+)$/);
+                // Check for data URI (media type is optional - make it handle malformed data URIs like "data:;base64,...")
+                const dataMatch = inputImage.match(/^data:([^;]*);base64,(.+)$/);
                 if (dataMatch) {
                     addMediaItem(mediaItems, dataMatch[2], dataMatch[1], `input.input_images[${idx}]`, source);
                 } else if (inputImage.match(/^https?:\/\/.+\.(png|jpg|jpeg|gif|webp)$/i)) {
@@ -843,8 +843,8 @@ function extractReplicateImages(data, source, mediaItems) {
             if (typeof output === 'string') {
                 const field = Array.isArray(data.output) ? `output[${idx}]` : 'output';
 
-                // Check for data URI
-                const dataMatch = output.match(/^data:([^;]+);base64,(.+)$/);
+                // Check for data URI (media type is optional - make it handle malformed data URIs like "data:;base64,...")
+                const dataMatch = output.match(/^data:([^;]*);base64,(.+)$/);
                 if (dataMatch) {
                     addMediaItem(mediaItems, dataMatch[2], dataMatch[1], field, source);
                 } else if (output.match(/^https?:\/\/.+\.(png|jpg|jpeg|gif|webp)$/i)) {
@@ -857,6 +857,25 @@ function extractReplicateImages(data, source, mediaItems) {
             }
         });
     }
+}
+
+function detectMediaTypeFromBase64(base64Data) {
+    // Detect media type from base64 magic bytes/signatures
+    try {
+        const bytes = atob(base64Data.substring(0, 50));
+        if (bytes.charCodeAt(0) === 0x89 && bytes.charCodeAt(1) === 0x50) {
+            return 'image/png';
+        } else if (bytes.charCodeAt(0) === 0xFF && bytes.charCodeAt(1) === 0xD8) {
+            return 'image/jpeg';
+        } else if (bytes.substring(0, 3) === 'GIF') {
+            return 'image/gif';
+        } else if (bytes.charCodeAt(0) === 0x52 && bytes.charCodeAt(1) === 0x49 && bytes.charCodeAt(2) === 0x46) {
+            return 'image/webp';
+        }
+    } catch (e) {
+        // Default if parsing fails
+    }
+    return 'image/png'; // Default fallback
 }
 
 function addMediaItem(mediaItems, data, mediaType, field, source, isUrl = false) {
@@ -877,7 +896,11 @@ function addMediaItem(mediaItems, data, mediaType, field, source, isUrl = false)
 
         // Verify media type or guess from header
         let detectedType = mediaType;
-        if (!mediaType || mediaType === 'image/png') {
+        if (!mediaType || mediaType.length === 0) {
+            // Media type is empty, detect from base64 header
+            detectedType = detectMediaTypeFromBase64(data);
+        } else if (mediaType === 'image/png') {
+            // If explicitly PNG, verify or detect
             try {
                 const bytes = atob(data.substring(0, 50));
                 if (bytes.charCodeAt(0) === 0x89 && bytes.charCodeAt(1) === 0x50) {
