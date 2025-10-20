@@ -2,6 +2,7 @@ package proxy
 
 import (
 	"bytes"
+	"compress/gzip"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -74,6 +75,39 @@ func (ph *ProxyHandler) Handle(w http.ResponseWriter, r *http.Request) {
 		ph.handleStreamingResponse(w, selectedProvider, proxyReq, requestID)
 	} else {
 		ph.handleRegularResponse(w, selectedProvider, proxyReq, requestID, start)
+	}
+}
+
+// decompressBody decompresses the response body based on Content-Encoding header
+func decompressBody(body []byte, contentEncoding string) ([]byte, error) {
+	contentEncoding = strings.ToLower(strings.TrimSpace(contentEncoding))
+
+	switch contentEncoding {
+	case "gzip":
+		reader, err := gzip.NewReader(bytes.NewBuffer(body))
+		if err != nil {
+			return nil, fmt.Errorf("failed to create gzip reader: %w", err)
+		}
+		defer reader.Close()
+
+		decompressed, err := io.ReadAll(reader)
+		if err != nil {
+			return nil, fmt.Errorf("failed to decompress gzip: %w", err)
+		}
+		return decompressed, nil
+
+	case "deflate", "br", "compress":
+		// These encodings are not supported yet, return original
+		fmt.Printf("Warning: unsupported Content-Encoding: %s, storing compressed\n", contentEncoding)
+		return body, nil
+
+	case "", "identity":
+		// No compression
+		return body, nil
+
+	default:
+		// Unknown encoding, return original
+		return body, nil
 	}
 }
 
@@ -168,9 +202,21 @@ func (ph *ProxyHandler) handleRegularResponse(
 	}
 	defer resp.Body.Close()
 
-	// Read response body
+	// Read response body (may be compressed)
 	respBody, _ := io.ReadAll(resp.Body)
 	duration := int(time.Since(start).Milliseconds())
+
+	// Decompress body for storage (keep original for client)
+	contentEncoding := resp.Header.Get("Content-Encoding")
+	decompressedBody := respBody
+	if contentEncoding != "" {
+		var err error
+		decompressedBody, err = decompressBody(respBody, contentEncoding)
+		if err != nil {
+			fmt.Printf("Warning: failed to decompress response: %v, storing compressed\n", err)
+			decompressedBody = respBody
+		}
+	}
 
 	// Check if this is a binary response
 	contentType := resp.Header.Get("Content-Type")
@@ -178,7 +224,7 @@ func (ph *ProxyHandler) handleRegularResponse(
 		strings.HasPrefix(contentType, "audio/") ||
 		strings.HasPrefix(contentType, "video/")
 
-	// If binary, save to filesystem
+	// If binary, save to filesystem (use original body for binary data)
 	var binaryFilePath string
 	var binaryFileSize int64
 	if isBinary {
@@ -189,7 +235,7 @@ func (ph *ProxyHandler) handleRegularResponse(
 		}
 	}
 
-	// Log the response
+	// Log the response (with decompressed body)
 	headers := make(map[string]string)
 	for key, values := range resp.Header {
 		if len(values) > 0 {
@@ -201,7 +247,7 @@ func (ph *ProxyHandler) handleRegularResponse(
 		RequestID:  requestID,
 		StatusCode: resp.StatusCode,
 		Headers:    headers,
-		Body:       string(respBody),
+		Body:       string(decompressedBody),
 		DurationMs: duration,
 	}
 
@@ -281,6 +327,18 @@ func (ph *ProxyHandler) handleStreamingResponse(
 	// Log the response
 	duration := int(time.Since(start).Milliseconds())
 
+	// Decompress body for storage (keep original for client)
+	contentEncoding := resp.Header.Get("Content-Encoding")
+	storedBody := bufferedResponse.String()
+	if contentEncoding != "" {
+		decompressedBody, err := decompressBody(bufferedResponse.Bytes(), contentEncoding)
+		if err != nil {
+			fmt.Printf("Warning: failed to decompress streaming response: %v, storing compressed\n", err)
+		} else {
+			storedBody = string(decompressedBody)
+		}
+	}
+
 	headers := make(map[string]string)
 	for key, values := range resp.Header {
 		if len(values) > 0 {
@@ -292,7 +350,7 @@ func (ph *ProxyHandler) handleStreamingResponse(
 		RequestID:  requestID,
 		StatusCode: resp.StatusCode,
 		Headers:    headers,
-		Body:       bufferedResponse.String(),
+		Body:       storedBody,
 		DurationMs: duration,
 	}
 
