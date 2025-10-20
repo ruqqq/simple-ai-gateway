@@ -139,10 +139,12 @@ function createRequestElement(request) {
         errorBadge.className = 'error-badge';
         errorBadge.textContent = '⚠ Error';
         errorBadge.title = request.error_message || 'Request failed';
-        clone.querySelector('.request-header').appendChild(errorBadge);
+        item.insertBefore(errorBadge, item.querySelector('.request-timestamp'));
     }
 
-    clone.querySelector('.request-endpoint').textContent = request.endpoint;
+    const endpointEl = clone.querySelector('.request-endpoint');
+    endpointEl.querySelector('span').textContent = request.endpoint;
+    endpointEl.title = request.endpoint;
     clone.querySelector('.request-timestamp').textContent = formatTime(new Date(request.created_at));
 
     return item;
