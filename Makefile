@@ -1,7 +1,7 @@
 .PHONY: build clean run test help
 
 # Variables
-BINARY_NAME=gateway
+BINARY_NAME=aigw
 GO_FILES=$(shell find . -type f -name '*.go')
 VERSION?=$(shell git describe --tags --always --dirty 2>/dev/null || echo "dev")
 
@@ -23,19 +23,19 @@ help:
 # Build the binary
 build: deps
 	@echo "Building $(BINARY_NAME)..."
-	@go build -o $(BINARY_NAME) ./cmd/gateway
+	@go build -o $(BINARY_NAME) ./cmd/aigw
 	@echo "✓ Built: $(BINARY_NAME)"
 
 # Build with debug symbols
 dev: deps
 	@echo "Building $(BINARY_NAME) (debug)..."
-	@go build -gcflags="all=-N -l" -o $(BINARY_NAME) ./cmd/gateway
+	@go build -gcflags="all=-N -l" -o $(BINARY_NAME) ./cmd/aigw
 	@echo "✓ Built: $(BINARY_NAME) (with debug symbols)"
 
 # Build optimized release binary
 release: deps clean
 	@echo "Building $(BINARY_NAME) (release)..."
-	@go build -ldflags="-s -w -X main.Version=$(VERSION)" -o $(BINARY_NAME) ./cmd/gateway
+	@go build -ldflags="-s -w -X main.Version=$(VERSION)" -o $(BINARY_NAME) ./cmd/aigw
 	@echo "✓ Built: $(BINARY_NAME) (optimized)"
 
 # Run the gateway

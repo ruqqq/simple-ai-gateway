@@ -20,6 +20,13 @@ A lightweight, self-hosted gateway that proxies API requests to multiple AI prov
 
 ### Installation
 
+**Quick Install** (requires Go 1.21+):
+```bash
+go install github.com/ruqqq/simple-ai-gateway/cmd/aigw@latest
+```
+
+**From Source:**
+
 1. Clone the repository
 ```bash
 git clone https://github.com/ruqqq/simple-ai-gateway.git
@@ -28,7 +35,7 @@ cd simple-ai-gateway
 
 2. Build the application
 ```bash
-go build -o gateway ./cmd/gateway
+go build -o aigw ./cmd/aigw
 ```
 
 ### Configuration
@@ -51,12 +58,12 @@ All values have sensible defaults and are optional.
 ### Running the Gateway
 
 ```bash
-./gateway
+./aigw
 ```
 
 Or with custom configuration:
 ```bash
-PORT=3000 DB_PATH=/var/lib/gateway/gateway.db ./gateway
+PORT=3000 DB_PATH=/var/lib/gateway/gateway.db ./aigw
 ```
 
 The gateway will start listening on the configured port (default: 8080).

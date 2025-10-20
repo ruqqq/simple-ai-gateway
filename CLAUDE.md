@@ -94,7 +94,7 @@ To add a new AI provider (e.g., Anthropic):
    - `GetProxyURL(path)`: Strip the provider prefix and return the upstream URL
    - `PrepareRequest(req)`: Handle provider-specific auth format (e.g., `x-api-key` header)
    - `IsStreamingEndpoint(path)`: Return true for endpoints that support streaming
-3. Register the provider in `cmd/gateway/main.go` by adding it to the `providers` slice
+3. Register the provider in `cmd/aigw/main.go` by adding it to the `providers` slice
 4. Update README and CLAUDE.md documentation with the new endpoint paths
 5. No changes needed to proxy/logging logic - it's provider-agnostic
 
@@ -128,7 +128,7 @@ See `internal/config/config.go` for how defaults are applied.
 - Uses `io.TeeReader` to capture stream while forwarding live
 
 ### Request Flow
-1. `cmd/gateway/main.go`: Initialize config, DB, storage, providers, create chi router
+1. `cmd/aigw/main.go`: Initialize config, DB, storage, providers, create chi router
 2. `internal/proxy/proxy.go#Handle()`: Route request to appropriate provider, log request, detect if streaming
 3. `handleRegularResponse()` or `handleStreamingResponse()`: Execute request, decompress if needed, log response, forward to client
 4. Database and filesystem operations happen asynchronously with warnings logged if they fail (won't block proxying)
@@ -150,7 +150,7 @@ WHERE r.id = '<request-id>';
 **Testing with a real API call:**
 ```bash
 # Start gateway
-./gateway
+./aigw
 
 # In another terminal, test via gateway
 curl -X POST http://localhost:8080/openai/v1/chat/completions \

@@ -35,4 +35,5 @@ data/
 !data/.gitkeep
 
 # Compiled binaries
-gateway
+aigw
+!cmd/aigw/
