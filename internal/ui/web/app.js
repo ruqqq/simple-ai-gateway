@@ -182,6 +182,7 @@ function renderRequestDetails(detail) {
     clone.getElementById('detail-provider').textContent = detail.request.provider;
     clone.getElementById('detail-endpoint').textContent = detail.request.endpoint;
     clone.getElementById('detail-method').textContent = detail.request.method;
+    clone.getElementById('detail-created-at').textContent = formatTime(new Date(detail.request.created_at));
 
     const requestBody = detail.request.body || '';
     const requestMediaItems = mediaItems.filter(m => m.source === 'request');
