@@ -297,6 +297,11 @@ body {
     color: var(--color-danger);
 }
 
+.status-badge.status-pending {
+    background-color: rgba(245, 158, 11, 0.1);
+    color: var(--color-warning);
+}
+
 .error-badge {
     display: inline-block;
     padding: 0.25rem 0.75rem;

@@ -120,7 +120,7 @@ function createRequestElement(request) {
         statusBadge.className = `status-badge ${statusClass}`;
     } else {
         statusBadge.textContent = 'Pending';
-        statusBadge.className = 'status-badge';
+        statusBadge.className = 'status-badge status-pending';
     }
 
     // Add error badge if this is an error response
