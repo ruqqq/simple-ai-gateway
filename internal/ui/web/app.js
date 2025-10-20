@@ -246,6 +246,23 @@ function renderRequestDetails(detail) {
         renderMediaPreview(previewContainer, mediaItems);
     }
 
+    // Hide empty tabs
+    // Hide Preview tab if no media items
+    if (mediaItems.length === 0) {
+        const previewBtn = clone.querySelector('.tab-btn[data-tab="preview"]');
+        const previewPane = clone.querySelector('.tab-pane[data-tab="preview"]');
+        if (previewBtn) previewBtn.style.display = 'none';
+        if (previewPane) previewPane.style.display = 'none';
+    }
+
+    // Hide Binary Files tab if no files
+    if (!detail.binary_files || detail.binary_files.length === 0) {
+        const filesBtn = clone.querySelector('.tab-btn[data-tab="files"]');
+        const filesPane = clone.querySelector('.tab-pane[data-tab="files"]');
+        if (filesBtn) filesBtn.style.display = 'none';
+        if (filesPane) filesPane.style.display = 'none';
+    }
+
     // Replace content
     container.innerHTML = '';
     container.appendChild(clone);
