@@ -33,3 +33,6 @@ vendor/
 # Application data
 data/
 !data/.gitkeep
+
+# Compiled binaries
+gateway
