@@ -887,6 +887,12 @@ function extractOpenAIImages(data, source, mediaItems) {
                         const match = url.match(/^data:([^;]*);base64,(.+)$/);
                         if (match) {
                             addMediaItem(mediaItems, match[2], match[1], `input[${msgIdx}].content[${itemIdx}].image_url`, source);
+                        } else if (url.match(/^https?:\/\/.+\.(png|jpg|jpeg|gif|webp)$/i)) {
+                            // Check for image URL
+                            const ext = url.split('.').pop().toLowerCase();
+                            const mimeTypes = { png: 'image/png', jpg: 'image/jpeg', jpeg: 'image/jpeg', gif: 'image/gif', webp: 'image/webp' };
+                            const mediaType = mimeTypes[ext] || 'image/png';
+                            addMediaItem(mediaItems, url, mediaType, `input[${msgIdx}].content[${itemIdx}].image_url`, source, true);
                         }
                     }
                 });
