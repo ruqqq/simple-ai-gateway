@@ -63,7 +63,9 @@ The gateway will start listening on the configured port (default: 8080).
 
 ### Using the Gateway
 
-Instead of pointing your client to `https://api.openai.com`, point it to your gateway:
+The gateway uses **path-based routing** to support multiple AI providers. Use the provider prefix in your base URL:
+
+#### OpenAI Example
 
 **Before:**
 ```python
@@ -78,21 +80,49 @@ from openai import OpenAI
 
 client = OpenAI(
     api_key="your-api-key",
-    base_url="http://localhost:8080/v1"
+    base_url="http://localhost:8080/openai/v1"
 )
 ```
 
-The API key is passed through to OpenAI, so your existing authentication remains unchanged.
+#### Replicate Example
+
+```python
+import replicate
+
+# Use the gateway base URL with /replicate/v1 prefix
+prediction = replicate.run(
+    "stability-ai/sdxl:...",
+    input={...},
+    # Configure replicate client to use gateway
+    api_token="<your-replicate-token>",
+)
+```
+
+Or via curl:
+```bash
+curl -X POST http://localhost:8080/replicate/v1/predictions \
+  -H "Authorization: Token $REPLICATE_TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{...}'
+```
+
+API keys are passed through to the provider, so your existing authentication remains unchanged.
 
 ## Supported Endpoints
 
-The gateway currently supports:
+### OpenAI (`/openai/v1/*`)
+- `/openai/v1/chat/completions` - Chat completions (with streaming support)
+- `/openai/v1/images/generations` - Image generation
+- `/openai/v1/images/edits` - Image editing
+- `/openai/v1/images/variations` - Image variations
+- And generally proxies all `/openai/v1/*` endpoints
 
-- `/v1/chat/completions` - Chat completions (with streaming support)
-- `/v1/images/generations` - Image generation
-- `/v1/images/edits` - Image editing
-- `/v1/images/variations` - Image variations
-- And generally proxies all `/v1/*` endpoints
+### Replicate (`/replicate/v1/*`)
+- `/replicate/v1/predictions` - Create and run predictions (with streaming support)
+- `/replicate/v1/predictions/{id}` - Get prediction details
+- `/replicate/v1/models` - List models
+- `/replicate/v1/collections` - List collections
+- And generally proxies all `/replicate/v1/*` endpoints
 
 ## Database Schema
 
@@ -174,7 +204,8 @@ simple-ai-gateway/
 │   ├── storage/                     # File storage layer
 │   ├── provider/                    # Provider interface & implementations
 │   │   ├── provider.go              # Provider interface
-│   │   └── openai.go                # OpenAI provider
+│   │   ├── openai.go                # OpenAI provider
+│   │   └── replicate.go             # Replicate provider
 │   └── proxy/                       # Request proxying & logging
 ```
 

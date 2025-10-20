@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Overview
 
-**Simple AI Gateway** is a lightweight, self-hosted reverse proxy that intercepts API requests to AI providers (currently OpenAI) and logs all requests/responses to SQLite for auditing and debugging. It's designed as a transparent drop-in replacement for direct API calls.
+**Simple AI Gateway** is a lightweight, self-hosted reverse proxy that intercepts API requests to multiple AI providers (OpenAI, Replicate) and logs all requests/responses to SQLite for auditing and debugging. It's designed as a transparent drop-in replacement for direct API calls, with path-based routing to support multiple providers.
 
 ### Key Architecture Decisions
 
@@ -56,6 +56,20 @@ make all
 make help
 ```
 
+## Path-Based Routing
+
+The gateway uses **path-based routing** to support multiple AI providers simultaneously:
+
+- **OpenAI**: `/openai/v1/*` → `https://api.openai.com/v1/*`
+  - Example: `POST http://gateway:8080/openai/v1/chat/completions`
+
+- **Replicate**: `/replicate/v1/*` → `https://api.replicate.com/v1/*`
+  - Example: `POST http://gateway:8080/replicate/v1/predictions`
+
+The provider prefix (e.g., `/openai`, `/replicate`) is stripped before forwarding to the upstream API. This allows the same gateway instance to proxy requests to multiple providers.
+
+**Breaking Change**: Existing OpenAI clients must update their `base_url` from `http://gateway:8080/v1` to `http://gateway:8080/openai/v1`.
+
 ## Database Schema
 
 Three main tables in SQLite:
@@ -64,16 +78,27 @@ Three main tables in SQLite:
 - **responses**: `id`, `request_id`, `status_code`, `headers` (JSON), `body`, `duration_ms`, `created_at`
 - **binary_files**: `id`, `request_id`, `response_id`, `file_path`, `content_type`, `size`, `created_at`
 
+The `provider` field in the `requests` table indicates which provider handled each request (e.g., "openai" or "replicate").
+
 Query the database: `sqlite3 data/gateway.db`
 
 ## Adding a New Provider
 
-To add a new AI provider:
+To add a new AI provider (e.g., Anthropic):
 
 1. Create a new file `internal/provider/{provider_name}.go` implementing the `Provider` interface
-2. Implement all 6 required methods: `Name()`, `GetBaseURL()`, `ShouldProxy()`, `GetProxyURL()`, `PrepareRequest()`, `IsStreamingEndpoint()`
-3. Register the provider in `cmd/gateway/main.go` line 47-49 by adding it to the `providers` slice
-4. No changes needed to proxy/logging logic - it's provider-agnostic
+2. Implement all 6 required methods:
+   - `Name()`: Return the provider name (e.g., "anthropic")
+   - `GetBaseURL()`: Return the provider's API base URL
+   - `ShouldProxy(path)`: Check if path matches your provider's pattern (e.g., `/anthropic/v1/*`)
+   - `GetProxyURL(path)`: Strip the provider prefix and return the upstream URL
+   - `PrepareRequest(req)`: Handle provider-specific auth format (e.g., `x-api-key` header)
+   - `IsStreamingEndpoint(path)`: Return true for endpoints that support streaming
+3. Register the provider in `cmd/gateway/main.go` by adding it to the `providers` slice
+4. Update README and CLAUDE.md documentation with the new endpoint paths
+5. No changes needed to proxy/logging logic - it's provider-agnostic
+
+**Path-Based Routing Pattern**: All providers use the same pattern: `/{provider_name}/v1/*` → provider API. The proxy handler iterates through registered providers and uses the first one where `ShouldProxy()` returns true.
 
 ## Configuration
 

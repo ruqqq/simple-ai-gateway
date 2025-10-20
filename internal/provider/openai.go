@@ -33,14 +33,17 @@ func (p *OpenAIProvider) GetBaseURL() string {
 }
 
 // ShouldProxy checks if a request should be proxied to OpenAI
-// For now, proxy all /v1/* requests
+// Proxy requests with /openai/v1/* prefix
 func (p *OpenAIProvider) ShouldProxy(path string) bool {
-	return strings.HasPrefix(path, "/v1/")
+	return strings.HasPrefix(path, "/openai/v1/")
 }
 
 // GetProxyURL returns the full OpenAI API URL
+// Strips the /openai prefix before forwarding
 func (p *OpenAIProvider) GetProxyURL(path string) string {
-	return p.baseURL + path
+	// Remove /openai prefix: /openai/v1/chat/completions -> /v1/chat/completions
+	strippedPath := strings.TrimPrefix(path, "/openai")
+	return p.baseURL + strippedPath
 }
 
 // PrepareRequest adds OpenAI-specific headers
@@ -69,8 +72,8 @@ func (p *OpenAIProvider) PrepareRequest(req *http.Request) error {
 func (p *OpenAIProvider) IsStreamingEndpoint(path string) bool {
 	// Endpoints that support streaming (when stream=true parameter is present)
 	streamingEndpoints := []string{
-		"/v1/chat/completions",
-		"/v1/completions",
+		"/openai/v1/chat/completions",
+		"/openai/v1/completions",
 	}
 
 	for _, endpoint := range streamingEndpoints {

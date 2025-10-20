@@ -46,6 +46,7 @@ func main() {
 	// Initialize providers
 	providers := []provider.Provider{
 		provider.NewOpenAIProvider(),
+		provider.NewReplicateProvider(),
 	}
 
 	// Create proxy handler
