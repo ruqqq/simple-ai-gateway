@@ -169,6 +169,50 @@ async function loadRequestDetails(requestId) {
     }
 }
 
+// Attach copy button listeners
+function attachCopyButtonListeners(container, detail) {
+    const copyButtons = container.querySelectorAll('.copy-btn');
+
+    copyButtons.forEach(btn => {
+        btn.addEventListener('click', async (e) => {
+            e.preventDefault();
+            e.stopPropagation();
+
+            const targetId = btn.dataset.copyTarget;
+            const format = btn.dataset.copyFormat;
+            const targetElement = container.querySelector(`#${targetId}`);
+
+            if (!targetElement) return;
+
+            let textToCopy = '';
+
+            // Handle different target types
+            if (targetId === 'detail-endpoint') {
+                // Copy endpoint text
+                textToCopy = targetElement.textContent || '';
+            } else if (targetId === 'detail-request-headers' || targetId === 'detail-response-headers') {
+                // Copy headers (already formatted JSON)
+                const codeElement = targetElement.querySelector('code');
+                textToCopy = codeElement ? codeElement.textContent : '';
+            } else if (targetId === 'detail-request-body' || targetId === 'detail-response-body') {
+                // Handle body copying - raw vs redacted
+                if (format === 'raw') {
+                    // Use the raw body data stored in the element
+                    textToCopy = targetElement.dataset.rawBody || '';
+                } else if (format === 'redacted') {
+                    // Use the displayed (redacted) version
+                    const codeElement = targetElement.querySelector('code');
+                    textToCopy = codeElement ? codeElement.textContent : '';
+                }
+            }
+
+            if (textToCopy) {
+                await copyToClipboard(textToCopy, btn);
+            }
+        });
+    });
+}
+
 // Render request details
 function renderRequestDetails(detail) {
     const container = document.getElementById('details-container');
@@ -189,8 +233,10 @@ function renderRequestDetails(detail) {
     const displayRequestBody = requestMediaItems.length > 0
         ? redactBase64FromJSON(requestBody, requestMediaItems)
         : formatJSON(requestBody);
-    clone.getElementById('detail-request-body').querySelector('code').textContent =
-        displayRequestBody || '(empty)';
+    const requestBodyEl = clone.getElementById('detail-request-body');
+    requestBodyEl.querySelector('code').textContent = displayRequestBody || '(empty)';
+    // Store raw body for copy functionality
+    requestBodyEl.dataset.rawBody = requestBody || '';
 
     // Response tab
     if (detail.response) {
@@ -202,7 +248,10 @@ function renderRequestDetails(detail) {
         const displayResponseBody = responseMediaItems.length > 0
             ? redactBase64FromJSON(responseBody, responseMediaItems)
             : formatJSON(responseBody);
-        clone.getElementById('detail-response-body').querySelector('code').textContent = displayResponseBody || '(empty)';
+        const responseBodyEl = clone.getElementById('detail-response-body');
+        responseBodyEl.querySelector('code').textContent = displayResponseBody || '(empty)';
+        // Store raw body for copy functionality
+        responseBodyEl.dataset.rawBody = responseBody || '';
 
         // Check if response is an image
         if (isImageResponse(detail.response)) {
@@ -272,6 +321,9 @@ function renderRequestDetails(detail) {
     container.querySelectorAll('.tab-btn').forEach(btn => {
         btn.addEventListener('click', (e) => switchTab(e.target.dataset.tab, container));
     });
+
+    // Attach copy button listeners
+    attachCopyButtonListeners(container, detail);
 }
 
 // Create file element
@@ -486,6 +538,26 @@ function updateConnectionStatus(connected) {
         indicator.classList.remove('status-connected');
         indicator.classList.add('status-disconnected');
         text.textContent = 'Disconnected';
+    }
+}
+
+// Copy to clipboard helper function
+async function copyToClipboard(text, buttonElement) {
+    try {
+        await navigator.clipboard.writeText(text);
+
+        // Visual feedback
+        const originalContent = buttonElement.textContent;
+        buttonElement.textContent = '✓';
+        buttonElement.classList.add('copied');
+
+        // Reset after 1.5 seconds
+        setTimeout(() => {
+            buttonElement.textContent = originalContent;
+            buttonElement.classList.remove('copied');
+        }, 1500);
+    } catch (err) {
+        console.error('Failed to copy to clipboard:', err);
     }
 }
 

@@ -153,7 +153,7 @@
                             <div id="detail-provider" class="info-value"></div>
                         </div>
                         <div class="info-group">
-                            <label>Endpoint</label>
+                            <label>Endpoint <button class="copy-btn" data-copy-target="detail-endpoint" data-copy-format="raw" title="Copy to clipboard">📋</button></label>
                             <div id="detail-endpoint" class="info-value"></div>
                         </div>
                         <div class="info-group">
@@ -165,12 +165,15 @@
                             <div id="detail-created-at" class="info-value"></div>
                         </div>
                         <div class="info-group">
-                            <label>Request Headers</label>
+                            <label>Request Headers <button class="copy-btn" data-copy-target="detail-request-headers" data-copy-format="raw" title="Copy to clipboard">📋</button></label>
                             <pre id="detail-request-headers" class="code-block"><code></code></pre>
                         </div>
                         <div class="info-group">
-                            <label>Request Body</label>
-                            <pre id="detail-request-body" class="code-block"><code></code></pre>
+                            <label>Request Body
+                                <button class="copy-btn" data-copy-target="detail-request-body" data-copy-format="raw" title="Copy raw request body">📋 Raw</button>
+                                <button class="copy-btn" data-copy-target="detail-request-body" data-copy-format="redacted" title="Copy redacted request body">📋 Redacted</button>
+                            </label>
+                            <pre id="detail-request-body" class="code-block" data-raw-body=""><code></code></pre>
                         </div>
                     </div>
                 </div>
@@ -187,13 +190,16 @@
                             <div id="detail-duration" class="info-value"></div>
                         </div>
                         <div class="info-group">
-                            <label>Response Headers</label>
+                            <label>Response Headers <button class="copy-btn" data-copy-target="detail-response-headers" data-copy-format="raw" title="Copy to clipboard">📋</button></label>
                             <pre id="detail-response-headers" class="code-block"><code></code></pre>
                         </div>
                         <div class="info-group">
-                            <label>Response Body</label>
+                            <label>Response Body
+                                <button class="copy-btn" data-copy-target="detail-response-body" data-copy-format="raw" title="Copy raw response body">📋 Raw</button>
+                                <button class="copy-btn" data-copy-target="detail-response-body" data-copy-format="redacted" title="Copy redacted response body">📋 Redacted</button>
+                            </label>
                             <div id="detail-response-body-container" class="response-body-container">
-                                <pre id="detail-response-body" class="code-block"><code></code></pre>
+                                <pre id="detail-response-body" class="code-block" data-raw-body=""><code></code></pre>
                             </div>
                         </div>
                     </div>
