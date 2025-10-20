@@ -153,7 +153,7 @@ WHERE r.id = '<request-id>';
 ./gateway
 
 # In another terminal, test via gateway
-curl -X POST http://localhost:8080/v1/chat/completions \
+curl -X POST http://localhost:8080/openai/v1/chat/completions \
   -H "Authorization: Bearer $OPENAI_API_KEY" \
   -H "Content-Type: application/json" \
   -d '{"model":"gpt-4","messages":[{"role":"user","content":"hi"}]}'
@@ -162,10 +162,19 @@ curl -X POST http://localhost:8080/v1/chat/completions \
 sqlite3 data/gateway.db "SELECT body FROM responses ORDER BY created_at DESC LIMIT 1;"
 ```
 
+## Web UI
+
+The gateway includes a built-in web UI for browsing logged requests and responses:
+- Located in `internal/ui/web/` (embedded into the binary via `go:embed`)
+- Accessible at the gateway's root path (e.g., `http://localhost:8080`)
+- Real-time updates using Server-Sent Events (SSE)
+- Media preview for images extracted from requests/responses
+- Request filtering by provider, date range, and endpoint pattern
+
 ## Known Limitations & Future Work
 
-- Only supports OpenAI, Anthropic, Google providers need to be added
-- No web UI yet for browsing logged data (third-party SQLite browser required)
-- No request filtering, search, or export functionality
+- Additional providers beyond OpenAI and Replicate need to be added (Anthropic, Google, etc.)
+- Web UI could be enhanced with advanced search and filtering capabilities
+- No request filtering, search, or export functionality at API level
 - No rate limiting or quota management
 - No request modification hooks (intercepting/modifying requests before forwarding)

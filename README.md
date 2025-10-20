@@ -1,13 +1,13 @@
 # Simple AI Gateway
 
-A lightweight, self-hosted gateway that proxies API requests to AI providers (starting with OpenAI) while logging all requests and responses to SQLite for audit and debugging purposes.
+A lightweight, self-hosted gateway that proxies API requests to multiple AI providers (OpenAI, Replicate, and more) while logging all requests and responses to SQLite for audit and debugging purposes.
 
 ## Features
 
 - **Request/Response Logging**: All requests and responses are persisted to SQLite with full headers, bodies, status codes, and timing information
 - **Streaming Support**: Handles both regular and streaming (Server-Sent Events) responses
 - **Binary File Storage**: Images and other binary responses are stored on the filesystem with database references for easy lookup
-- **Multi-Provider Ready**: Extensible architecture supports adding multiple AI providers (currently OpenAI)
+- **Multi-Provider Support**: Built-in support for OpenAI and Replicate with extensible architecture for adding more providers
 - **Simple Deployment**: Zero-config with sensible defaults, uses environment variables with optional `.env` file
 - **Transparent Proxy**: Drop-in replacement - just change your API base URL from `https://api.openai.com` to your gateway URL
 
@@ -198,6 +198,7 @@ ORDER BY r.created_at DESC;
 simple-ai-gateway/
 ├── cmd/gateway/main.go              # Entry point
 ├── internal/
+│   ├── api/                         # REST API handlers
 │   ├── config/                      # Configuration management
 │   ├── database/                    # SQLite database layer
 │   │   └── migrations/              # Database schema
@@ -206,14 +207,19 @@ simple-ai-gateway/
 │   │   ├── provider.go              # Provider interface
 │   │   ├── openai.go                # OpenAI provider
 │   │   └── replicate.go             # Replicate provider
-│   └── proxy/                       # Request proxying & logging
+│   ├── proxy/                       # Request proxying & logging
+│   └── ui/
+│       ├── embed.go                 # Web UI embedding
+│       └── web/                     # Web UI files (embedded in binary)
+│           ├── index.html
+│           ├── app.js
+│           └── styles.css
 ```
 
 ## Future Features
 
 - [ ] Additional providers (Anthropic, Google, etc.)
-- [ ] Web UI for browsing logged requests/responses
-- [ ] Request filtering and search
+- [ ] Advanced request filtering and search in Web UI
 - [ ] Export functionality (CSV, JSON)
 - [ ] Rate limiting and quota management
 - [ ] Request modification/interception hooks
