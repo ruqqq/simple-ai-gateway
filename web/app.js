@@ -688,6 +688,25 @@ function extractReplicateImages(data, source, mediaItems) {
         }
     });
 
+    // Handle input_images array (plural)
+    if (Array.isArray(data.input?.input_images)) {
+        data.input.input_images.forEach((inputImage, idx) => {
+            if (inputImage && typeof inputImage === 'string') {
+                // Check for data URI
+                const dataMatch = inputImage.match(/^data:([^;]+);base64,(.+)$/);
+                if (dataMatch) {
+                    addMediaItem(mediaItems, dataMatch[2], dataMatch[1], `input.input_images[${idx}]`, source);
+                } else if (inputImage.match(/^https?:\/\/.+\.(png|jpg|jpeg|gif|webp)$/i)) {
+                    // Check for image URL
+                    const ext = inputImage.split('.').pop().toLowerCase();
+                    const mimeTypes = { png: 'image/png', jpg: 'image/jpeg', jpeg: 'image/jpeg', gif: 'image/gif', webp: 'image/webp' };
+                    const mediaType = mimeTypes[ext] || 'image/png';
+                    addMediaItem(mediaItems, inputImage, mediaType, `input.input_images[${idx}]`, source, true);
+                }
+            }
+        });
+    }
+
     // Output (can be string or array)
     if (data.output) {
         const outputs = Array.isArray(data.output) ? data.output : [data.output];
@@ -785,6 +804,13 @@ function redactBase64FromJSON(jsonString, mediaItems) {
             }
             if (item.field === 'input.input_image' && data.input?.input_image) {
                 data.input.input_image = `[BASE64_IMAGE_REDACTED - ${item.base64.length} bytes - See Preview tab]`;
+            }
+            if (item.field.startsWith('input.input_images[') && Array.isArray(data.input?.input_images)) {
+                const match = item.field.match(/input\.input_images\[(\d+)\]/);
+                if (match) {
+                    const idx = parseInt(match[1]);
+                    data.input.input_images[idx] = `[BASE64_IMAGE_REDACTED - ${item.base64.length} bytes - See Preview tab]`;
+                }
             }
             if (item.field === 'output' && data.output && typeof data.output === 'string') {
                 data.output = `[BASE64_IMAGE_REDACTED - ${item.base64.length} bytes - See Preview tab]`;
