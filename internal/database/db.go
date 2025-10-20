@@ -23,19 +23,34 @@ type DB struct {
 
 // New creates a new database connection and runs migrations
 func New(dbPath string) (*DB, error) {
-	// Create parent directories if they don't exist
-	if err := os.MkdirAll(filepath.Dir(dbPath), 0755); err != nil {
-		return nil, fmt.Errorf("failed to create database directory: %w", err)
+	// Get absolute path for better error messages
+	absPath, err := filepath.Abs(dbPath)
+	if err != nil {
+		return nil, fmt.Errorf("failed to resolve absolute path for %s: %w", dbPath, err)
 	}
 
-	conn, err := sql.Open("sqlite3", dbPath)
+	// Create parent directories if they don't exist
+	dirPath := filepath.Dir(absPath)
+	if err := os.MkdirAll(dirPath, 0755); err != nil {
+		return nil, fmt.Errorf("failed to create database directory %s: %w", dirPath, err)
+	}
+
+	// Verify directory was created
+	if stat, err := os.Stat(dirPath); err != nil {
+		return nil, fmt.Errorf("database directory %s does not exist after creation: %w", dirPath, err)
+	} else if !stat.IsDir() {
+		return nil, fmt.Errorf("database path %s exists but is not a directory", dirPath)
+	}
+
+	conn, err := sql.Open("sqlite3", absPath)
 	if err != nil {
-		return nil, fmt.Errorf("failed to open database: %w", err)
+		return nil, fmt.Errorf("failed to open database at %s: %w", absPath, err)
 	}
 
 	// Test the connection
 	if err := conn.Ping(); err != nil {
-		return nil, fmt.Errorf("failed to ping database: %w", err)
+		conn.Close()
+		return nil, fmt.Errorf("failed to ping database at %s: %w", absPath, err)
 	}
 
 	// Set connection pool settings
