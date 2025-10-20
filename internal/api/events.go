@@ -128,7 +128,7 @@ func FormatSSEMessage(event *EventMessage) (string, error) {
 		return "", err
 	}
 
-	return fmt.Sprintf("data: %s\n\n", string(data)), nil
+	return fmt.Sprintf("event: %s\ndata: %s\n\n", event.Type, string(data)), nil
 }
 
 // Close closes the broadcaster
