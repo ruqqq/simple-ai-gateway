@@ -68,6 +68,35 @@ PORT=3000 DB_PATH=/var/lib/gateway/gateway.db ./aigw
 
 The gateway will start listening on the configured port (default: 8080).
 
+### Project-Specific Data Storage
+
+To keep proxy data organized per project, run aigw from a project-specific directory. This keeps all request/response logs and files local to that project:
+
+```bash
+# Create a project-specific directory
+mkdir -p ProjectA/.aigw
+cd ProjectA/.aigw
+
+# Run aigw from this directory
+aigw
+# Data will be stored in ProjectA/.aigw/data/
+```
+
+Alternatively, explicitly set custom paths when starting aigw:
+
+```bash
+cd ProjectA
+DB_PATH=./.aigw/data/gateway.db FILE_STORAGE_PATH=./.aigw/data/files aigw
+```
+
+You can also add `.aigw/` to your project's `.gitignore` to prevent committing proxy logs:
+
+```bash
+echo ".aigw/" >> ProjectA/.gitignore
+```
+
+This approach allows you to run separate aigw instances for different projects, each with isolated data.
+
 ### Using the Gateway
 
 The gateway uses **path-based routing** to support multiple AI providers. Use the provider prefix in your base URL:
