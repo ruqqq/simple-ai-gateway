@@ -10,6 +10,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/andybalholm/brotli"
 	"github.com/ruqqq/simple-ai-gateway/internal/database"
 	"github.com/ruqqq/simple-ai-gateway/internal/provider"
 	"github.com/ruqqq/simple-ai-gateway/internal/storage"
@@ -96,7 +97,15 @@ func decompressBody(body []byte, contentEncoding string) ([]byte, error) {
 		}
 		return decompressed, nil
 
-	case "deflate", "br", "compress":
+	case "br":
+		decompressed := brotli.NewReader(bytes.NewBuffer(body))
+		result, err := io.ReadAll(decompressed)
+		if err != nil {
+			return nil, fmt.Errorf("failed to decompress brotli: %w", err)
+		}
+		return result, nil
+
+	case "deflate", "compress":
 		// These encodings are not supported yet, return original
 		fmt.Printf("Warning: unsupported Content-Encoding: %s, storing compressed\n", contentEncoding)
 		return body, nil
