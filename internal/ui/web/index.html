@@ -61,6 +61,42 @@
 
             <!-- Main Content Area -->
             <div class="content-area">
+                <!-- Mobile Filters (hidden on desktop) -->
+                <div class="mobile-filters collapsed" id="mobile-filters">
+                    <button class="filter-toggle" id="mobile-filter-toggle">🔍 Filters ▾</button>
+                    <div class="filter-content">
+                        <div>
+                            <label for="mobile-provider-filter">Provider</label>
+                            <select id="mobile-provider-filter">
+                                <option value="">All Providers</option>
+                                <option value="openai">OpenAI</option>
+                                <option value="replicate">Replicate</option>
+                                <option value="anthropic">Anthropic</option>
+                            </select>
+                        </div>
+
+                        <div>
+                            <label for="mobile-path-filter">Endpoint Pattern</label>
+                            <input type="text" id="mobile-path-filter" placeholder="e.g., /chat/completions">
+                        </div>
+
+                        <div>
+                            <label for="mobile-date-from-filter">From Date</label>
+                            <input type="datetime-local" id="mobile-date-from-filter">
+                        </div>
+
+                        <div>
+                            <label for="mobile-date-to-filter">To Date</label>
+                            <input type="datetime-local" id="mobile-date-to-filter">
+                        </div>
+
+                        <div class="filter-actions">
+                            <button id="mobile-apply-filters-btn" class="btn btn-primary">Apply</button>
+                            <button id="mobile-clear-filters-btn" class="btn btn-secondary">Clear</button>
+                        </div>
+                    </div>
+                </div>
+
                 <!-- Requests List -->
                 <section class="requests-list">
                     <h2>Requests</h2>

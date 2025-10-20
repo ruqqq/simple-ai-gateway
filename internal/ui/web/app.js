@@ -22,9 +22,21 @@ document.addEventListener('DOMContentLoaded', () => {
 
 // Initialize event listeners
 function initializeEventListeners() {
-    // Filter buttons
+    // Desktop filter buttons
     document.getElementById('apply-filters-btn').addEventListener('click', applyFilters);
     document.getElementById('clear-filters-btn').addEventListener('click', clearFilters);
+
+    // Mobile filter toggle
+    const mobileFilterToggle = document.getElementById('mobile-filter-toggle');
+    if (mobileFilterToggle) {
+        mobileFilterToggle.addEventListener('click', toggleMobileFilters);
+    }
+
+    // Mobile filter buttons
+    const mobileApplyBtn = document.getElementById('mobile-apply-filters-btn');
+    const mobileClearBtn = document.getElementById('mobile-clear-filters-btn');
+    if (mobileApplyBtn) mobileApplyBtn.addEventListener('click', applyMobileFilters);
+    if (mobileClearBtn) mobileClearBtn.addEventListener('click', clearMobileFilters);
 
     // Tab buttons
     document.querySelectorAll('.tab-btn').forEach(btn => {
@@ -128,6 +140,11 @@ async function selectRequest(requestId) {
 
     // Load and display details
     await loadRequestDetails(requestId);
+
+    // Scroll to details on mobile
+    if (window.innerWidth < 768) {
+        scrollToDetails();
+    }
 }
 
 // Load request details
@@ -295,6 +312,52 @@ function clearFilters() {
     loadRequests();
 }
 
+// Mobile Filters Functions
+function toggleMobileFilters() {
+    const mobileFilters = document.getElementById('mobile-filters');
+    mobileFilters.classList.toggle('expanded');
+}
+
+function applyMobileFilters() {
+    app.filters.provider = document.getElementById('mobile-provider-filter').value;
+    app.filters.pathPattern = document.getElementById('mobile-path-filter').value;
+
+    const dateFromStr = document.getElementById('mobile-date-from-filter').value;
+    const dateToStr = document.getElementById('mobile-date-to-filter').value;
+
+    app.filters.dateFrom = dateFromStr ? new Date(dateFromStr) : null;
+    app.filters.dateTo = dateToStr ? new Date(dateToStr) : null;
+
+    const btn = document.getElementById('mobile-apply-filters-btn');
+    btn.classList.add('btn-loading');
+    btn.innerHTML = '<span class="spinner"></span>Applying...';
+
+    loadRequests().finally(() => {
+        btn.classList.remove('btn-loading');
+        btn.innerHTML = 'Apply';
+
+        // Close filters and scroll to requests
+        document.getElementById('mobile-filters').classList.remove('expanded');
+        scrollToRequests();
+    });
+}
+
+function clearMobileFilters() {
+    app.filters = {
+        provider: '',
+        pathPattern: '',
+        dateFrom: null,
+        dateTo: null,
+    };
+
+    document.getElementById('mobile-provider-filter').value = '';
+    document.getElementById('mobile-path-filter').value = '';
+    document.getElementById('mobile-date-from-filter').value = '';
+    document.getElementById('mobile-date-to-filter').value = '';
+
+    loadRequests();
+}
+
 // Connect to SSE
 function connectSSE() {
     if (app.eventSource) return;
@@ -455,6 +518,25 @@ function showError(message) {
     // Simple error notification
     console.error(message);
     // Could be enhanced with toast notifications
+}
+
+// Scroll Helper Functions
+function scrollToDetails() {
+    const detailsSection = document.querySelector('.request-details');
+    if (detailsSection) {
+        setTimeout(() => {
+            detailsSection.scrollIntoView({ behavior: 'smooth', block: 'start' });
+        }, 100);
+    }
+}
+
+function scrollToRequests() {
+    const requestsSection = document.querySelector('.requests-list');
+    if (requestsSection) {
+        setTimeout(() => {
+            requestsSection.scrollIntoView({ behavior: 'smooth', block: 'start' });
+        }, 100);
+    }
 }
 
 // Loading indicator helpers
