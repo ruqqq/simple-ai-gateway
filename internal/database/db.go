@@ -61,6 +61,16 @@ func (db *DB) migrate() error {
 	}
 
 	for _, migrationFile := range migrations {
+		// Check if migration has already been run
+		alreadyRun, err := db.hasMigrationBeenRun(migrationFile)
+		if err != nil {
+			return fmt.Errorf("failed to check migration status for %s: %w", migrationFile, err)
+		}
+
+		if alreadyRun {
+			continue
+		}
+
 		content, err := migrationFS.ReadFile(migrationFile)
 		if err != nil {
 			return fmt.Errorf("failed to read migration file %s: %w", migrationFile, err)
@@ -70,9 +80,42 @@ func (db *DB) migrate() error {
 		if err != nil {
 			return fmt.Errorf("failed to execute migration %s: %w", migrationFile, err)
 		}
+
+		// Record that migration has been run
+		if err := db.recordMigration(migrationFile); err != nil {
+			return fmt.Errorf("failed to record migration %s: %w", migrationFile, err)
+		}
 	}
 
 	return nil
+}
+
+// hasMigrationBeenRun checks if a migration has already been executed
+func (db *DB) hasMigrationBeenRun(name string) (bool, error) {
+	// Create migrations_history table if it doesn't exist
+	_, err := db.conn.Exec(`
+		CREATE TABLE IF NOT EXISTS migrations_history (
+			name TEXT PRIMARY KEY,
+			executed_at DATETIME DEFAULT CURRENT_TIMESTAMP
+		)
+	`)
+	if err != nil {
+		return false, err
+	}
+
+	var count int
+	err = db.conn.QueryRow("SELECT COUNT(*) FROM migrations_history WHERE name = ?", name).Scan(&count)
+	if err != nil {
+		return false, err
+	}
+
+	return count > 0, nil
+}
+
+// recordMigration records that a migration has been executed
+func (db *DB) recordMigration(name string) error {
+	_, err := db.conn.Exec("INSERT INTO migrations_history (name) VALUES (?)", name)
+	return err
 }
 
 // Close closes the database connection
