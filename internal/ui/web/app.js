@@ -509,6 +509,11 @@ function connectSSE() {
         app.eventSource.addEventListener('response_created', (event) => {
             const data = JSON.parse(event.data).data;
             updateRequestStatus(data.request_id, data.status_code, data.is_error || false, data.error_message || '');
+
+            // Auto-reload details if this response is for the currently selected request
+            if (data.request_id === app.selectedRequestId) {
+                loadRequestDetails(data.request_id);
+            }
         });
 
         app.eventSource.onerror = () => {

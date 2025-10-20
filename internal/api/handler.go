@@ -274,9 +274,11 @@ func (h *Handler) BroadcastResponseCreated(resp *database.Response) {
 	event := &EventMessage{
 		Type: "response_created",
 		Data: map[string]interface{}{
-			"request_id":  resp.RequestID,
-			"status_code": resp.StatusCode,
-			"duration_ms": resp.DurationMs,
+			"request_id":    resp.RequestID,
+			"status_code":   resp.StatusCode,
+			"duration_ms":   resp.DurationMs,
+			"is_error":      resp.IsError,
+			"error_message": resp.ErrorMessage,
 		},
 	}
 
