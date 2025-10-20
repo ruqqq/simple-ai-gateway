@@ -13,8 +13,8 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 2. **Request/Response Logging Flow**:
    - Incoming request → parse + log to SQLite (`requests` table)
    - Forward to provider API
-   - Receive response (potentially gzip-compressed)
-   - **Decompress for storage** (gzip responses are decompressed before storing in DB to keep data readable)
+   - Receive response (potentially compressed with gzip or Brotli)
+   - **Decompress for storage** (responses are decompressed before storing in DB to keep data readable)
    - **Send original compressed response to client** (transparent proxy behavior)
    - Log decompressed response to SQLite (`responses` table)
 
@@ -88,11 +88,14 @@ See `internal/config/config.go` for how defaults are applied.
 ## Important Implementation Details
 
 ### Response Decompression (`internal/proxy/proxy.go`)
-- OpenAI sends gzip-compressed responses when `Accept-Encoding: gzip` is present
-- The `decompressBody()` function handles this transparently
+- OpenAI sends compressed responses using gzip or Brotli based on client's `Accept-Encoding`
+- The `decompressBody()` function handles both transparently:
+  - `gzip`: Uses Go's standard `compress/gzip` package
+  - `br` (Brotli): Uses `github.com/andybalholm/brotli` package
 - Decompressed body is stored in database (readable JSON)
 - Original compressed response is sent to client (bandwidth efficient)
 - This applies to both regular and streaming responses
+- Falls back to storing compressed if decompression fails
 
 ### Streaming Detection
 - Checks if endpoint is in `streamingEndpoints` list (e.g., `/v1/chat/completions`)
