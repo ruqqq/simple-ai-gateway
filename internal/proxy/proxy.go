@@ -3,11 +3,13 @@ package proxy
 import (
 	"bytes"
 	"compress/gzip"
+	"context"
 	"encoding/json"
 	"fmt"
 	"io"
 	"net/http"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/andybalholm/brotli"
@@ -18,11 +20,14 @@ import (
 )
 
 type ProxyHandler struct {
-	db          *database.DB
-	storage     *storage.FileStorage
-	providers   map[string]provider.Provider
-	broadcaster *api.SSEBroadcaster
-	apiHandler  *api.Handler
+	db              *database.DB
+	storage         *storage.FileStorage
+	providers       map[string]provider.Provider
+	broadcaster     *api.SSEBroadcaster
+	apiHandler      *api.Handler
+	inflightWg      sync.WaitGroup
+	shutdownCtx     context.Context
+	shutdownMutex   sync.RWMutex
 }
 
 // New creates a new proxy handler
@@ -38,11 +43,46 @@ func New(db *database.DB, fs *storage.FileStorage, providers []provider.Provider
 		providers:   providerMap,
 		broadcaster: broadcaster,
 		apiHandler:  apiHandler,
+		shutdownCtx: context.Background(), // Default context, will be replaced by SetShutdownContext
+	}
+}
+
+// SetShutdownContext sets the context used to signal shutdown
+func (ph *ProxyHandler) SetShutdownContext(ctx context.Context) {
+	ph.shutdownMutex.Lock()
+	defer ph.shutdownMutex.Unlock()
+	ph.shutdownCtx = ctx
+}
+
+// GetShutdownContext returns the current shutdown context
+func (ph *ProxyHandler) GetShutdownContext() context.Context {
+	ph.shutdownMutex.RLock()
+	defer ph.shutdownMutex.RUnlock()
+	return ph.shutdownCtx
+}
+
+// WaitForInflightRequests waits for all in-flight requests to complete (up to context timeout)
+func (ph *ProxyHandler) WaitForInflightRequests(ctx context.Context) {
+	done := make(chan struct{})
+	go func() {
+		ph.inflightWg.Wait()
+		close(done)
+	}()
+
+	select {
+	case <-done:
+		fmt.Println("All in-flight requests completed")
+	case <-ctx.Done():
+		fmt.Println("Timeout waiting for in-flight requests to complete")
 	}
 }
 
 // Handle is the main HTTP handler for proxying requests
 func (ph *ProxyHandler) Handle(w http.ResponseWriter, r *http.Request) {
+	// Increment the in-flight request counter
+	ph.inflightWg.Add(1)
+	defer ph.inflightWg.Done()
+
 	start := time.Now()
 
 	// Find the appropriate provider
@@ -104,6 +144,34 @@ func (ph *ProxyHandler) logErrorResponse(requestID string, err error, start time
 	responseID, dbErr := ph.db.StoreResponse(respInput)
 	if dbErr != nil {
 		fmt.Printf("Warning: failed to log error response: %v\n", dbErr)
+	}
+
+	return responseID, nil
+}
+
+// logAbortedResponse logs a response for a request that was aborted due to server shutdown
+func (ph *ProxyHandler) logAbortedResponse(requestID string, start time.Time) (string, error) {
+	duration := int(time.Since(start).Milliseconds())
+
+	respInput := &database.StoreResponseInput{
+		RequestID:    requestID,
+		StatusCode:   http.StatusServiceUnavailable, // 503
+		Headers:      make(map[string]string),
+		Body:         "",
+		DurationMs:   duration,
+		IsError:      true,
+		ErrorMessage: "Request cancelled due to server shutdown",
+	}
+
+	responseID, dbErr := ph.db.StoreResponse(respInput)
+	if dbErr != nil {
+		fmt.Printf("Warning: failed to log aborted response: %v\n", dbErr)
+	}
+
+	// Emit response created event
+	storedResp, err := ph.db.GetResponse(responseID)
+	if err == nil && storedResp != nil {
+		go ph.apiHandler.BroadcastResponseCreated(storedResp)
 	}
 
 	return responseID, nil
@@ -247,10 +315,23 @@ func (ph *ProxyHandler) handleRegularResponse(
 	// Log outgoing request
 	fmt.Printf("[OUT] → %s %s %s\n", prov.Name(), proxyReq.Method, proxyReq.URL.String())
 
+	// Apply shutdown context to the request for cancellation on shutdown
+	shutdownCtx := ph.GetShutdownContext()
+	proxyReq = proxyReq.WithContext(shutdownCtx)
+
 	client := &http.Client{}
 	resp, err := client.Do(proxyReq)
 	if err != nil {
 		fmt.Printf("Error reaching provider: %v\n", err)
+
+		// Check if this is a context cancellation due to shutdown
+		if shutdownCtx.Err() != nil {
+			fmt.Printf("Request cancelled due to server shutdown\n")
+			ph.logAbortedResponse(requestID, start)
+			// Don't return error to client since the response may have already been started
+			return
+		}
+
 		// Log error to database
 		ph.logErrorResponse(requestID, err, start)
 		// Return error to client
@@ -361,10 +442,23 @@ func (ph *ProxyHandler) handleStreamingResponse(
 	// Log outgoing request
 	fmt.Printf("[OUT] → %s %s %s\n", prov.Name(), proxyReq.Method, proxyReq.URL.String())
 
+	// Apply shutdown context to the request for cancellation on shutdown
+	shutdownCtx := ph.GetShutdownContext()
+	proxyReq = proxyReq.WithContext(shutdownCtx)
+
 	client := &http.Client{}
 	resp, err := client.Do(proxyReq)
 	if err != nil {
 		fmt.Printf("Error reaching provider: %v\n", err)
+
+		// Check if this is a context cancellation due to shutdown
+		if shutdownCtx.Err() != nil {
+			fmt.Printf("Request cancelled due to server shutdown\n")
+			ph.logAbortedResponse(requestID, start)
+			// Don't return error to client since the response may have already been started
+			return
+		}
+
 		// Log error to database
 		ph.logErrorResponse(requestID, err, start)
 		// Return error to client

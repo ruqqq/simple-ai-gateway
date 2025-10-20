@@ -124,6 +124,10 @@ function createRequestElement(request) {
         const statusClass = getStatusClass(request.status);
         statusBadge.textContent = request.status;
         statusBadge.className = `status-badge ${statusClass}`;
+    } else if (request.is_error) {
+        // If there's no status but is_error is true, it means the request was cancelled
+        statusBadge.textContent = 'Cancelled';
+        statusBadge.className = 'status-badge status-cancelled';
     } else {
         statusBadge.textContent = 'Pending';
         statusBadge.className = 'status-badge status-pending';

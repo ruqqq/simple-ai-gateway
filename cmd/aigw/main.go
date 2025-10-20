@@ -1,11 +1,13 @@
 package main
 
 import (
+	"context"
 	"fmt"
 	"net/http"
 	"os"
 	"os/signal"
 	"syscall"
+	"time"
 
 	"github.com/go-chi/chi/v5"
 	"github.com/ruqqq/simple-ai-gateway/internal/api"
@@ -53,13 +55,18 @@ func main() {
 
 	// Initialize SSE broadcaster
 	broadcaster := api.NewSSEBroadcaster()
-	defer broadcaster.Close()
+	// Note: broadcaster.Close() is called explicitly during shutdown, not deferred
 
 	// Create API handler
 	apiHandler := api.NewHandler(db, fs, broadcaster)
 
-	// Create proxy handler
+	// Create shutdown context for graceful termination
+	shutdownCtx, shutdownCancel := context.WithCancel(context.Background())
+	defer shutdownCancel()
+
+	// Create proxy handler with shutdown context
 	proxyHandler := proxy.New(db, fs, providers, broadcaster, apiHandler)
+	proxyHandler.SetShutdownContext(shutdownCtx)
 
 	// Create router
 	r := chi.NewRouter()
@@ -118,8 +125,21 @@ func main() {
 	<-sigChan
 	fmt.Println("\nShutting down server...")
 
+	// 1. Close SSE broadcaster first (disconnect all SSE clients immediately)
+	broadcaster.Close()
+
+	// 2. Signal proxy handler to abort new provider requests and in-flight ones if timeout exceeded
+	shutdownCancel()
+
+	// 3. Wait ONLY for in-flight proxy requests (up to 10 seconds)
+	shutdownTimeout := 10 * time.Second
+	timeoutCtx, timeoutCancel := context.WithTimeout(context.Background(), shutdownTimeout)
+	defer timeoutCancel()
+	proxyHandler.WaitForInflightRequests(timeoutCtx)
+
+	// 4. Force close the server (don't wait for other HTTP connections like keep-alive)
 	if err := server.Close(); err != nil {
-		fmt.Fprintf(os.Stderr, "Error during shutdown: %v\n", err)
+		fmt.Fprintf(os.Stderr, "Error closing server: %v\n", err)
 	}
 
 	fmt.Println("Server stopped")

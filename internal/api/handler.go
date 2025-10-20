@@ -96,10 +96,14 @@ func (h *Handler) ListRequests(w http.ResponseWriter, r *http.Request) {
 			CreatedAt: req.CreatedAt,
 		}
 
-		// Try to get response status code
+		// Try to get response status code and error information
 		resp, err := h.db.GetResponseByRequestID(req.ID)
 		if err == nil && resp != nil {
 			item.Status = resp.StatusCode
+			item.IsError = resp.IsError
+			if resp.ErrorMessage != nil && *resp.ErrorMessage != "" {
+				item.ErrorMessage = *resp.ErrorMessage
+			}
 		}
 
 		items = append(items, item)
@@ -133,14 +137,19 @@ func (h *Handler) GetRequest(w http.ResponseWriter, r *http.Request) {
 
 	// Get response (query by request_id from responses table)
 	rows, err := h.db.GetResponseByRequestID(requestID)
+	if err != nil {
+		fmt.Printf("Warning: failed to get response for request %s: %v\n", requestID, err)
+	}
 	if err == nil && rows != nil {
 		detail.Response = &ResponseDetail{
-			ID:         rows.ID,
-			StatusCode: rows.StatusCode,
-			Headers:    rows.Headers,
-			Body:       rows.Body,
-			DurationMs: rows.DurationMs,
-			CreatedAt:  rows.CreatedAt,
+			ID:           rows.ID,
+			StatusCode:   rows.StatusCode,
+			Headers:      rows.Headers,
+			Body:         rows.Body,
+			DurationMs:   rows.DurationMs,
+			IsError:      rows.IsError,
+			ErrorMessage: rows.ErrorMessage,
+			CreatedAt:    rows.CreatedAt,
 		}
 	}
 

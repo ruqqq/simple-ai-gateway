@@ -302,6 +302,11 @@ body {
     color: var(--color-warning);
 }
 
+.status-badge.status-cancelled {
+    background-color: rgba(107, 114, 128, 0.1);
+    color: var(--color-text-secondary);
+}
+
 .error-badge {
     display: inline-block;
     padding: 0.25rem 0.75rem;

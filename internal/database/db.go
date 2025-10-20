@@ -244,13 +244,19 @@ func (db *DB) GetResponse(id string) (*Response, error) {
 
 	var resp Response
 	var headerJSON string
+	var errorMessage sql.NullString
 
-	err := row.Scan(&resp.ID, &resp.RequestID, &resp.StatusCode, &headerJSON, &resp.Body, &resp.DurationMs, &resp.IsError, &resp.ErrorMessage, &resp.CreatedAt)
+	err := row.Scan(&resp.ID, &resp.RequestID, &resp.StatusCode, &headerJSON, &resp.Body, &resp.DurationMs, &resp.IsError, &errorMessage, &resp.CreatedAt)
 	if err != nil {
 		if err == sql.ErrNoRows {
 			return nil, fmt.Errorf("response not found")
 		}
 		return nil, fmt.Errorf("failed to get response: %w", err)
+	}
+
+	// Convert sql.NullString to *string
+	if errorMessage.Valid {
+		resp.ErrorMessage = &errorMessage.String
 	}
 
 	if headerJSON != "" {
@@ -276,13 +282,19 @@ func (db *DB) GetResponseByRequestID(requestID string) (*Response, error) {
 
 	var resp Response
 	var headerJSON string
+	var errorMessage sql.NullString
 
-	err := row.Scan(&resp.ID, &resp.RequestID, &resp.StatusCode, &headerJSON, &resp.Body, &resp.DurationMs, &resp.IsError, &resp.ErrorMessage, &resp.CreatedAt)
+	err := row.Scan(&resp.ID, &resp.RequestID, &resp.StatusCode, &headerJSON, &resp.Body, &resp.DurationMs, &resp.IsError, &errorMessage, &resp.CreatedAt)
 	if err != nil {
 		if err == sql.ErrNoRows {
 			return nil, fmt.Errorf("response not found")
 		}
 		return nil, fmt.Errorf("failed to get response: %w", err)
+	}
+
+	// Convert sql.NullString to *string
+	if errorMessage.Valid {
+		resp.ErrorMessage = &errorMessage.String
 	}
 
 	if headerJSON != "" {

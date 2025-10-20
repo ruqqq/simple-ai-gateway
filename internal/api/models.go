@@ -8,22 +8,26 @@ import (
 
 // RequestListItem represents a request in the list view
 type RequestListItem struct {
-	ID        string    `json:"id"`
-	Provider  string    `json:"provider"`
-	Endpoint  string    `json:"endpoint"`
-	Method    string    `json:"method"`
-	CreatedAt time.Time `json:"created_at"`
-	Status    int       `json:"status,omitempty"` // From response if available
+	ID           string    `json:"id"`
+	Provider     string    `json:"provider"`
+	Endpoint     string    `json:"endpoint"`
+	Method       string    `json:"method"`
+	CreatedAt    time.Time `json:"created_at"`
+	Status       int       `json:"status,omitempty"`        // From response if available
+	IsError      bool      `json:"is_error,omitempty"`      // True if response indicates error
+	ErrorMessage string    `json:"error_message,omitempty"` // Error message if available
 }
 
 // ResponseDetail represents a response with details
 type ResponseDetail struct {
-	ID         string            `json:"id"`
-	StatusCode int               `json:"status_code"`
-	Headers    map[string]string `json:"headers"`
-	Body       string            `json:"body"`
-	DurationMs int               `json:"duration_ms"`
-	CreatedAt  time.Time         `json:"created_at"`
+	ID           string            `json:"id"`
+	StatusCode   int               `json:"status_code"`
+	Headers      map[string]string `json:"headers"`
+	Body         string            `json:"body"`
+	DurationMs   int               `json:"duration_ms"`
+	IsError      bool              `json:"is_error"`
+	ErrorMessage *string           `json:"error_message,omitempty"`
+	CreatedAt    time.Time         `json:"created_at"`
 }
 
 // BinaryFileDetail represents a binary file reference

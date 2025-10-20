@@ -25,7 +25,7 @@ type Response struct {
 	Body         string            `json:"body"`
 	DurationMs   int               `json:"duration_ms"`
 	IsError      bool              `json:"is_error"`
-	ErrorMessage string            `json:"error_message,omitempty"`
+	ErrorMessage *string           `json:"error_message,omitempty"`
 	CreatedAt    time.Time         `json:"created_at"`
 }
 
