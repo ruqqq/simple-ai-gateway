@@ -669,6 +669,7 @@ function extractMediaByProvider(jsonString, provider, source) {
 }
 
 function extractOpenAIImages(data, source, mediaItems) {
+    // Format 1: Chat Completions API - messages[].content[].image_url.url
     if (data.messages && Array.isArray(data.messages)) {
         data.messages.forEach((msg, msgIdx) => {
             if (msg.content && Array.isArray(msg.content)) {
@@ -677,10 +678,48 @@ function extractOpenAIImages(data, source, mediaItems) {
                         const url = item.image_url.url;
                         const match = url.match(/^data:([^;]+);base64,(.+)$/);
                         if (match) {
-                            addMediaItem(mediaItems, match[2], match[1], `messages[${msgIdx}].content[${itemIdx}]`, source);
+                            addMediaItem(mediaItems, match[2], match[1], `messages[${msgIdx}].content[${itemIdx}].image_url.url`, source);
                         }
                     }
                 });
+            }
+        });
+    }
+
+    // Format 2: Responses API (request) - input[].content[].image_url where type='input_image'
+    if (data.input && Array.isArray(data.input)) {
+        data.input.forEach((msg, msgIdx) => {
+            if (msg.content && Array.isArray(msg.content)) {
+                msg.content.forEach((item, itemIdx) => {
+                    if (item.type === 'input_image' && item.image_url) {
+                        const url = item.image_url;
+                        const match = url.match(/^data:([^;]+);base64,(.+)$/);
+                        if (match) {
+                            addMediaItem(mediaItems, match[2], match[1], `input[${msgIdx}].content[${itemIdx}].image_url`, source);
+                        }
+                    }
+                });
+            }
+        });
+    }
+
+    // Format 3: Responses API (response) - output[].result where type='image_generation_call'
+    if (data.output && Array.isArray(data.output)) {
+        data.output.forEach((item, idx) => {
+            if (item.type === 'image_generation_call' && item.result && typeof item.result === 'string') {
+                const result = item.result;
+                const match = result.match(/^data:([^;]+);base64,(.+)$/);
+                if (match) {
+                    addMediaItem(mediaItems, match[2], match[1], `output[${idx}].result`, source);
+                } else if (result.startsWith('iVBOR') || result.startsWith('/9j/')) {
+                    // Handle base64 without data URI prefix (common with OpenAI responses)
+                    // iVBOR = PNG header, /9j/ = JPEG header
+                    let mediaType = 'image/png';
+                    if (result.startsWith('/9j/')) {
+                        mediaType = 'image/jpeg';
+                    }
+                    addMediaItem(mediaItems, result, mediaType, `output[${idx}].result`, source);
+                }
             }
         });
     }
@@ -804,14 +843,37 @@ function redactBase64FromJSON(jsonString, mediaItems) {
         mediaItems.forEach(item => {
             if (!item.dataUri) return;
 
-            // Handle OpenAI format: messages[].content[].image_url.url
-            if (item.field.startsWith('messages')) {
-                const match = item.field.match(/messages\[(\d+)\]\.content\[(\d+)\]/);
+            // Handle OpenAI Chat Completions format: messages[].content[].image_url.url
+            if (item.field.startsWith('messages[')) {
+                const match = item.field.match(/messages\[(\d+)\]\.content\[(\d+)\]\.image_url\.url/);
                 if (match) {
                     const msgIdx = parseInt(match[1]);
                     const itemIdx = parseInt(match[2]);
                     if (data.messages?.[msgIdx]?.content?.[itemIdx]?.image_url) {
                         data.messages[msgIdx].content[itemIdx].image_url.url = `[BASE64_IMAGE_REDACTED - ${item.base64.length} bytes - See Preview tab]`;
+                    }
+                }
+            }
+
+            // Handle OpenAI Responses API (request) format: input[].content[].image_url
+            if (item.field.startsWith('input[') && item.field.includes('.content[') && item.field.includes('.image_url')) {
+                const match = item.field.match(/input\[(\d+)\]\.content\[(\d+)\]\.image_url/);
+                if (match) {
+                    const msgIdx = parseInt(match[1]);
+                    const itemIdx = parseInt(match[2]);
+                    if (Array.isArray(data.input) && data.input[msgIdx]?.content?.[itemIdx]?.image_url) {
+                        data.input[msgIdx].content[itemIdx].image_url = `[BASE64_IMAGE_REDACTED - ${item.base64.length} bytes - See Preview tab]`;
+                    }
+                }
+            }
+
+            // Handle OpenAI Responses API (response) format: output[].result
+            if (item.field.startsWith('output[') && item.field.includes('.result')) {
+                const match = item.field.match(/output\[(\d+)\]\.result/);
+                if (match) {
+                    const idx = parseInt(match[1]);
+                    if (Array.isArray(data.output) && data.output[idx] && data.output[idx].result) {
+                        data.output[idx].result = `[BASE64_IMAGE_REDACTED - ${item.base64.length} bytes - See Preview tab]`;
                     }
                 }
             }
@@ -833,8 +895,8 @@ function redactBase64FromJSON(jsonString, mediaItems) {
             if (item.field === 'output' && data.output && typeof data.output === 'string') {
                 data.output = `[BASE64_IMAGE_REDACTED - ${item.base64.length} bytes - See Preview tab]`;
             }
-            if (item.field.startsWith('output[') && Array.isArray(data.output)) {
-                const match = item.field.match(/output\[(\d+)\]/);
+            if (item.field.startsWith('output[') && !item.field.includes('.result') && Array.isArray(data.output)) {
+                const match = item.field.match(/output\[(\d+)\](?!\.)/);
                 if (match) {
                     const idx = parseInt(match[1]);
                     data.output[idx] = `[BASE64_IMAGE_REDACTED - ${item.base64.length} bytes - See Preview tab]`;
