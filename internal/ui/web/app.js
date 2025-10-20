@@ -11,6 +11,12 @@ const app = {
     },
     isLoadingRequests: false,
     isLoadingDetails: false,
+    // SSE reconnection tracking
+    reconnectTimer: null,
+    reconnectAttempts: 0,
+    isReconnecting: false,
+    maxReconnectAttempts: 10,
+    baseReconnectDelay: 3000, // 3 seconds
 };
 
 // Initialize app
@@ -470,12 +476,30 @@ function clearMobileFilters() {
     loadRequests();
 }
 
-// Connect to SSE
+// Connect to SSE with proper reconnection logic
 function connectSSE() {
-    if (app.eventSource) return;
+    // Prevent concurrent reconnection attempts
+    if (app.isReconnecting || app.eventSource) {
+        return;
+    }
+
+    app.isReconnecting = true;
 
     try {
         app.eventSource = new EventSource('/api/events');
+
+        // Reset reconnection attempts on successful connection
+        app.eventSource.addEventListener('connected', () => {
+            console.log('SSE connected successfully');
+            app.reconnectAttempts = 0;
+            app.isReconnecting = false;
+            // Clear any pending reconnection timer
+            if (app.reconnectTimer) {
+                clearTimeout(app.reconnectTimer);
+                app.reconnectTimer = null;
+            }
+            updateConnectionStatus(true);
+        });
 
         app.eventSource.addEventListener('request_created', (event) => {
             const request = JSON.parse(event.data).request;
@@ -487,22 +511,60 @@ function connectSSE() {
             updateRequestStatus(data.request_id, data.status_code, data.is_error || false, data.error_message || '');
         });
 
-        app.eventSource.addEventListener('connected', () => {
-            updateConnectionStatus(true);
-        });
-
         app.eventSource.onerror = () => {
-            updateConnectionStatus(false);
-            app.eventSource = null;
-            // Try to reconnect after 3 seconds
-            setTimeout(connectSSE, 3000);
+            console.warn('SSE error occurred, attempting to reconnect...');
+            closeSSEConnection();
+            scheduleReconnect();
         };
 
-        updateConnectionStatus(true);
+        updateConnectionStatus(true, false);
     } catch (error) {
         console.error('Error connecting to SSE:', error);
-        updateConnectionStatus(false);
+        app.isReconnecting = false;
+        closeSSEConnection();
+        scheduleReconnect();
     }
+}
+
+// Helper function to properly close SSE connection
+function closeSSEConnection() {
+    if (app.eventSource) {
+        app.eventSource.close();
+        app.eventSource = null;
+    }
+    updateConnectionStatus(false);
+}
+
+// Helper function to schedule reconnection with exponential backoff
+function scheduleReconnect() {
+    // Don't try to reconnect if we've exceeded max attempts
+    if (app.reconnectAttempts >= app.maxReconnectAttempts) {
+        console.error(`Max reconnection attempts (${app.maxReconnectAttempts}) reached. Please refresh the page or check the server status.`);
+        updateConnectionStatus(false, true);
+        return;
+    }
+
+    // Clear any existing pending reconnection timer
+    if (app.reconnectTimer) {
+        clearTimeout(app.reconnectTimer);
+    }
+
+    app.reconnectAttempts++;
+
+    // Calculate exponential backoff: 3s, 6s, 12s, ..., capped at 30s
+    const delay = Math.min(
+        app.baseReconnectDelay * Math.pow(2, app.reconnectAttempts - 1),
+        30000 // 30 second max
+    );
+
+    console.log(`Scheduling reconnection attempt ${app.reconnectAttempts}/${app.maxReconnectAttempts} in ${delay}ms`);
+    updateConnectionStatus(false, false, app.reconnectAttempts);
+
+    app.reconnectTimer = setTimeout(() => {
+        app.isReconnecting = false;
+        app.reconnectTimer = null;
+        connectSSE();
+    }, delay);
 }
 
 // Add request to list (real-time update)
@@ -557,8 +619,8 @@ function updateRequestStatus(requestId, statusCode, isError = false, errorMessag
     }
 }
 
-// Update connection status
-function updateConnectionStatus(connected) {
+// Update connection status with reconnection info
+function updateConnectionStatus(connected, maxRetriesExceeded = false, reconnectAttempt = 0) {
     const indicator = document.getElementById('status-indicator');
     const text = document.getElementById('status-text');
 
@@ -566,6 +628,15 @@ function updateConnectionStatus(connected) {
         indicator.classList.remove('status-disconnected');
         indicator.classList.add('status-connected');
         text.textContent = 'Connected';
+    } else if (maxRetriesExceeded) {
+        indicator.classList.remove('status-connected');
+        indicator.classList.add('status-disconnected');
+        text.textContent = 'Connection Failed - Max Retries Exceeded';
+        text.title = 'Please refresh the page or check the server status';
+    } else if (reconnectAttempt > 0) {
+        indicator.classList.remove('status-connected');
+        indicator.classList.add('status-disconnected');
+        text.textContent = `Reconnecting... (Attempt ${reconnectAttempt}/${app.maxReconnectAttempts})`;
     } else {
         indicator.classList.remove('status-connected');
         indicator.classList.add('status-disconnected');
@@ -1107,7 +1178,12 @@ function renderMediaPreview(container, mediaItems) {
 
 // Cleanup on page unload
 window.addEventListener('beforeunload', () => {
-    if (app.eventSource) {
-        app.eventSource.close();
+    // Close SSE connection
+    closeSSEConnection();
+
+    // Clear any pending reconnection timer
+    if (app.reconnectTimer) {
+        clearTimeout(app.reconnectTimer);
+        app.reconnectTimer = null;
     }
 });
