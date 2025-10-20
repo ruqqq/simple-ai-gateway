@@ -9,7 +9,8 @@ const app = {
         dateFrom: null,
         dateTo: null,
     },
-    isLoading: false,
+    isLoadingRequests: false,
+    isLoadingDetails: false,
 };
 
 // Initialize app
@@ -33,8 +34,10 @@ function initializeEventListeners() {
 
 // Load requests from API
 async function loadRequests() {
-    if (app.isLoading) return;
-    app.isLoading = true;
+    if (app.isLoadingRequests) return;
+    app.isLoadingRequests = true;
+
+    showRequestsLoading(true);
 
     try {
         const params = new URLSearchParams();
@@ -54,7 +57,8 @@ async function loadRequests() {
         console.error('Error loading requests:', error);
         showError('Failed to load requests');
     } finally {
-        app.isLoading = false;
+        app.isLoadingRequests = false;
+        showRequestsLoading(false);
     }
 }
 
@@ -128,6 +132,11 @@ async function selectRequest(requestId) {
 
 // Load request details
 async function loadRequestDetails(requestId) {
+    if (app.isLoadingDetails) return;
+    app.isLoadingDetails = true;
+
+    showDetailsLoading(true);
+
     try {
         const response = await fetch(`/api/requests/${requestId}`);
         if (!response.ok) throw new Error('Failed to load request details');
@@ -137,6 +146,9 @@ async function loadRequestDetails(requestId) {
     } catch (error) {
         console.error('Error loading request details:', error);
         showError('Failed to load request details');
+    } finally {
+        app.isLoadingDetails = false;
+        showDetailsLoading(false);
     }
 }
 
@@ -247,6 +259,10 @@ function switchTab(tabName, container = document) {
 
 // Apply filters
 function applyFilters() {
+    const btn = document.getElementById('apply-filters-btn');
+    btn.classList.add('btn-loading');
+    btn.innerHTML = '<span class="spinner"></span>Applying...';
+
     app.filters.provider = document.getElementById('provider-filter').value;
     app.filters.pathPattern = document.getElementById('path-filter').value;
 
@@ -256,7 +272,10 @@ function applyFilters() {
     app.filters.dateFrom = dateFromStr ? new Date(dateFromStr) : null;
     app.filters.dateTo = dateToStr ? new Date(dateToStr) : null;
 
-    loadRequests();
+    loadRequests().finally(() => {
+        btn.classList.remove('btn-loading');
+        btn.innerHTML = 'Apply Filters';
+    });
 }
 
 // Clear filters
@@ -436,6 +455,40 @@ function showError(message) {
     // Simple error notification
     console.error(message);
     // Could be enhanced with toast notifications
+}
+
+// Loading indicator helpers
+function showRequestsLoading(show) {
+    const container = document.getElementById('requests-container');
+    if (!container) return;
+
+    if (show) {
+        // Show skeleton loaders
+        const skeletons = Array(5).fill(0).map(() => {
+            const div = document.createElement('div');
+            div.className = 'skeleton-request-item';
+            div.innerHTML = `
+                <div class="skeleton-loader"></div>
+                <div class="skeleton-loader"></div>
+                <div class="skeleton-loader"></div>
+            `;
+            return div;
+        });
+
+        container.innerHTML = '';
+        skeletons.forEach(skeleton => container.appendChild(skeleton));
+    }
+}
+
+function showDetailsLoading(show) {
+    const container = document.getElementById('details-container');
+    if (!container) return;
+
+    if (show) {
+        container.classList.add('loading');
+    } else {
+        container.classList.remove('loading');
+    }
 }
 
 // Cleanup on page unload

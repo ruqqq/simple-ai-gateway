@@ -72,8 +72,14 @@
                 <!-- Request Details -->
                 <section class="request-details">
                     <h2>Request Details</h2>
-                    <div id="details-container" class="details-container">
+                    <div id="details-container" class="details-container" style="position: relative;">
                         <div class="no-selection">Select a request to view details</div>
+                        <div class="loading-overlay" id="details-loading-overlay">
+                            <div class="loading-container">
+                                <div class="spinner spinner-large"></div>
+                                <div>Loading details...</div>
+                            </div>
+                        </div>
                     </div>
                 </section>
             </div>
