@@ -139,7 +139,6 @@
             <div class="tabs">
                 <button class="tab-btn active" data-tab="request">Request</button>
                 <button class="tab-btn" data-tab="response">Response</button>
-                <button class="tab-btn" data-tab="headers">Headers</button>
                 <button class="tab-btn" data-tab="preview">Preview</button>
                 <button class="tab-btn" data-tab="files">Binary Files</button>
             </div>
@@ -162,6 +161,10 @@
                             <div id="detail-method" class="info-value"></div>
                         </div>
                         <div class="info-group">
+                            <label>Request Headers</label>
+                            <pre id="detail-request-headers" class="code-block"><code></code></pre>
+                        </div>
+                        <div class="info-group">
                             <label>Request Body</label>
                             <pre id="detail-request-body" class="code-block"><code></code></pre>
                         </div>
@@ -180,24 +183,14 @@
                             <div id="detail-duration" class="info-value"></div>
                         </div>
                         <div class="info-group">
+                            <label>Response Headers</label>
+                            <pre id="detail-response-headers" class="code-block"><code></code></pre>
+                        </div>
+                        <div class="info-group">
                             <label>Response Body</label>
                             <div id="detail-response-body-container" class="response-body-container">
                                 <pre id="detail-response-body" class="code-block"><code></code></pre>
                             </div>
-                        </div>
-                    </div>
-                </div>
-
-                <!-- Headers Tab -->
-                <div class="tab-pane" data-tab="headers">
-                    <div class="headers-info">
-                        <div class="info-group">
-                            <label>Request Headers</label>
-                            <pre id="detail-request-headers" class="code-block"><code></code></pre>
-                        </div>
-                        <div class="info-group">
-                            <label>Response Headers</label>
-                            <pre id="detail-response-headers" class="code-block"><code></code></pre>
                         </div>
                     </div>
                 </div>

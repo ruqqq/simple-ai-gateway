@@ -697,6 +697,11 @@ body {
     width: 40%;
 }
 
+/* Mobile Filters - Hidden on Desktop */
+.mobile-filters {
+    display: none;
+}
+
 /* Responsive Design */
 @media (max-width: 1200px) {
     .content-area {
