@@ -123,6 +123,15 @@ function createRequestElement(request) {
         statusBadge.className = 'status-badge';
     }
 
+    // Add error badge if this is an error response
+    if (request.is_error) {
+        const errorBadge = document.createElement('span');
+        errorBadge.className = 'error-badge';
+        errorBadge.textContent = '⚠ Error';
+        errorBadge.title = request.error_message || 'Request failed';
+        clone.querySelector('.request-header').appendChild(errorBadge);
+    }
+
     clone.querySelector('.request-endpoint').textContent = request.endpoint;
     clone.querySelector('.request-timestamp').textContent = formatTime(new Date(request.created_at));
 
@@ -242,6 +251,15 @@ function renderRequestDetails(detail) {
     if (detail.response) {
         clone.getElementById('detail-status-code').textContent = `${detail.response.status_code} ${getStatusText(detail.response.status_code)}`;
         clone.getElementById('detail-duration').textContent = `${detail.response.duration_ms}ms`;
+
+        // Show error information if this is an error response
+        if (detail.response.is_error) {
+            const errorMessageEl = clone.querySelector('.response-error-message');
+            if (errorMessageEl) {
+                errorMessageEl.innerHTML = `<strong>Error:</strong> ${escapeHtml(detail.response.error_message || 'Unknown error')}`;
+                errorMessageEl.style.display = 'block';
+            }
+        }
 
         const responseBody = detail.response.body || '';
         const responseMediaItems = mediaItems.filter(m => m.source === 'response');
@@ -466,7 +484,7 @@ function connectSSE() {
 
         app.eventSource.addEventListener('response_created', (event) => {
             const data = JSON.parse(event.data).data;
-            updateRequestStatus(data.request_id, data.status_code);
+            updateRequestStatus(data.request_id, data.status_code, data.is_error || false, data.error_message || '');
         });
 
         app.eventSource.addEventListener('connected', () => {
@@ -510,10 +528,12 @@ function addRequestToList(request) {
 }
 
 // Update request status (real-time update)
-function updateRequestStatus(requestId, statusCode) {
+function updateRequestStatus(requestId, statusCode, isError = false, errorMessage = '') {
     const request = app.requests.find(r => r.id === requestId);
     if (request) {
         request.status = statusCode;
+        request.is_error = isError;
+        request.error_message = errorMessage;
 
         // Update in list
         const item = document.querySelector(`[data-id="${requestId}"]`);
@@ -521,6 +541,18 @@ function updateRequestStatus(requestId, statusCode) {
             const statusBadge = item.querySelector('.status-badge');
             statusBadge.textContent = statusCode;
             statusBadge.className = `status-badge ${getStatusClass(statusCode)}`;
+
+            // Add error badge if error
+            if (isError) {
+                let errorBadge = item.querySelector('.error-badge');
+                if (!errorBadge) {
+                    errorBadge = document.createElement('span');
+                    errorBadge.className = 'error-badge';
+                    errorBadge.textContent = '⚠ Error';
+                    errorBadge.title = errorMessage || 'Request failed';
+                    item.querySelector('.request-header').appendChild(errorBadge);
+                }
+            }
         }
     }
 }
@@ -562,6 +594,17 @@ async function copyToClipboard(text, buttonElement) {
 }
 
 // Helper functions
+
+function escapeHtml(text) {
+    const map = {
+        '&': '&amp;',
+        '<': '&lt;',
+        '>': '&gt;',
+        '"': '&quot;',
+        "'": '&#039;'
+    };
+    return text.replace(/[&<>"']/g, m => map[m]);
+}
 
 function getStatusClass(status) {
     if (status >= 200 && status < 300) return 'status-2xx';

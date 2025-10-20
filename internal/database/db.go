@@ -55,14 +55,21 @@ func New(dbPath string) (*DB, error) {
 }
 
 func (db *DB) migrate() error {
-	content, err := migrationFS.ReadFile("migrations/001_init.sql")
-	if err != nil {
-		return fmt.Errorf("failed to read migration file: %w", err)
+	migrations := []string{
+		"migrations/001_init.sql",
+		"migrations/002_add_error_fields.sql",
 	}
 
-	_, err = db.conn.Exec(string(content))
-	if err != nil {
-		return fmt.Errorf("failed to execute migration: %w", err)
+	for _, migrationFile := range migrations {
+		content, err := migrationFS.ReadFile(migrationFile)
+		if err != nil {
+			return fmt.Errorf("failed to read migration file %s: %w", migrationFile, err)
+		}
+
+		_, err = db.conn.Exec(string(content))
+		if err != nil {
+			return fmt.Errorf("failed to execute migration %s: %w", migrationFile, err)
+		}
 	}
 
 	return nil
@@ -107,8 +114,8 @@ func (db *DB) StoreResponse(input *StoreResponseInput) (string, error) {
 	}
 
 	_, err = db.conn.Exec(
-		"INSERT INTO responses (id, request_id, status_code, headers, body, duration_ms) VALUES (?, ?, ?, ?, ?, ?)",
-		id, input.RequestID, input.StatusCode, headerJSON, input.Body, input.DurationMs,
+		"INSERT INTO responses (id, request_id, status_code, headers, body, duration_ms, is_error, error_message) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+		id, input.RequestID, input.StatusCode, headerJSON, input.Body, input.DurationMs, input.IsError, input.ErrorMessage,
 	)
 	if err != nil {
 		return "", fmt.Errorf("failed to store response: %w", err)
@@ -173,14 +180,14 @@ func (db *DB) GetResponse(id string) (*Response, error) {
 	defer db.mu.RUnlock()
 
 	row := db.conn.QueryRow(
-		"SELECT id, request_id, status_code, headers, body, duration_ms, created_at FROM responses WHERE id = ?",
+		"SELECT id, request_id, status_code, headers, body, duration_ms, is_error, error_message, created_at FROM responses WHERE id = ?",
 		id,
 	)
 
 	var resp Response
 	var headerJSON string
 
-	err := row.Scan(&resp.ID, &resp.RequestID, &resp.StatusCode, &headerJSON, &resp.Body, &resp.DurationMs, &resp.CreatedAt)
+	err := row.Scan(&resp.ID, &resp.RequestID, &resp.StatusCode, &headerJSON, &resp.Body, &resp.DurationMs, &resp.IsError, &resp.ErrorMessage, &resp.CreatedAt)
 	if err != nil {
 		if err == sql.ErrNoRows {
 			return nil, fmt.Errorf("response not found")
@@ -205,14 +212,14 @@ func (db *DB) GetResponseByRequestID(requestID string) (*Response, error) {
 	defer db.mu.RUnlock()
 
 	row := db.conn.QueryRow(
-		"SELECT id, request_id, status_code, headers, body, duration_ms, created_at FROM responses WHERE request_id = ? LIMIT 1",
+		"SELECT id, request_id, status_code, headers, body, duration_ms, is_error, error_message, created_at FROM responses WHERE request_id = ? LIMIT 1",
 		requestID,
 	)
 
 	var resp Response
 	var headerJSON string
 
-	err := row.Scan(&resp.ID, &resp.RequestID, &resp.StatusCode, &headerJSON, &resp.Body, &resp.DurationMs, &resp.CreatedAt)
+	err := row.Scan(&resp.ID, &resp.RequestID, &resp.StatusCode, &headerJSON, &resp.Body, &resp.DurationMs, &resp.IsError, &resp.ErrorMessage, &resp.CreatedAt)
 	if err != nil {
 		if err == sql.ErrNoRows {
 			return nil, fmt.Errorf("response not found")

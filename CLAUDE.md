@@ -75,10 +75,18 @@ The provider prefix (e.g., `/openai`, `/replicate`) is stripped before forwardin
 Three main tables in SQLite:
 
 - **requests**: `id`, `provider`, `endpoint`, `method`, `headers` (JSON), `body`, `created_at`
-- **responses**: `id`, `request_id`, `status_code`, `headers` (JSON), `body`, `duration_ms`, `created_at`
+- **responses**: `id`, `request_id`, `status_code`, `headers` (JSON), `body`, `duration_ms`, `is_error`, `error_message`, `created_at`
 - **binary_files**: `id`, `request_id`, `response_id`, `file_path`, `content_type`, `size`, `created_at`
 
 The `provider` field in the `requests` table indicates which provider handled each request (e.g., "openai" or "replicate").
+
+### Error Logging
+
+The `responses` table includes two error-tracking fields:
+- **is_error** (BOOLEAN): Flag set to true when the provider request fails (connection timeout, DNS error, etc.)
+- **error_message** (TEXT): Detailed error information (e.g., "context deadline exceeded", "connection refused")
+
+Failed requests return HTTP 502 Bad Gateway to the client and are logged with `is_error=true` for auditing.
 
 Query the database: `sqlite3 data/gateway.db`
 

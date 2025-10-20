@@ -18,13 +18,15 @@ type Request struct {
 
 // Response represents a stored API response
 type Response struct {
-	ID         string            `json:"id"`
-	RequestID  string            `json:"request_id"`
-	StatusCode int               `json:"status_code"`
-	Headers    map[string]string `json:"headers"`
-	Body       string            `json:"body"`
-	DurationMs int               `json:"duration_ms"`
-	CreatedAt  time.Time         `json:"created_at"`
+	ID           string            `json:"id"`
+	RequestID    string            `json:"request_id"`
+	StatusCode   int               `json:"status_code"`
+	Headers      map[string]string `json:"headers"`
+	Body         string            `json:"body"`
+	DurationMs   int               `json:"duration_ms"`
+	IsError      bool              `json:"is_error"`
+	ErrorMessage string            `json:"error_message,omitempty"`
+	CreatedAt    time.Time         `json:"created_at"`
 }
 
 // BinaryFile represents a stored binary file reference
@@ -54,6 +56,8 @@ type StoreResponseInput struct {
 	Headers    map[string]string
 	Body       string
 	DurationMs int
+	IsError    bool
+	ErrorMessage string
 }
 
 // Helper functions for JSON serialization

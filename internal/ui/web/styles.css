@@ -297,6 +297,17 @@ body {
     color: var(--color-danger);
 }
 
+.error-badge {
+    display: inline-block;
+    padding: 0.25rem 0.75rem;
+    border-radius: 12px;
+    font-size: 0.75rem;
+    font-weight: 600;
+    background-color: rgba(239, 68, 68, 0.1);
+    color: var(--color-danger);
+    white-space: nowrap;
+}
+
 .request-endpoint {
     font-size: 0.875rem;
     color: var(--color-text-primary);
@@ -479,6 +490,19 @@ body {
 .json-null {
     color: #881391;
     font-weight: 600;
+}
+
+/* Response Error Message */
+.response-error-message {
+    display: none;
+    padding: 1rem;
+    margin-bottom: 1rem;
+    background-color: rgba(239, 68, 68, 0.1);
+    border: 1px solid rgba(239, 68, 68, 0.3);
+    border-radius: 4px;
+    color: var(--color-danger);
+    font-size: 0.875rem;
+    word-break: break-word;
 }
 
 /* Response Body Container */

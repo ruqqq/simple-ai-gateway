@@ -87,6 +87,28 @@ func (ph *ProxyHandler) Handle(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
+// logErrorResponse logs an error response to the database
+func (ph *ProxyHandler) logErrorResponse(requestID string, err error, start time.Time) (string, error) {
+	duration := int(time.Since(start).Milliseconds())
+
+	respInput := &database.StoreResponseInput{
+		RequestID:    requestID,
+		StatusCode:   http.StatusBadGateway,
+		Headers:      make(map[string]string),
+		Body:         "",
+		DurationMs:   duration,
+		IsError:      true,
+		ErrorMessage: err.Error(),
+	}
+
+	responseID, dbErr := ph.db.StoreResponse(respInput)
+	if dbErr != nil {
+		fmt.Printf("Warning: failed to log error response: %v\n", dbErr)
+	}
+
+	return responseID, nil
+}
+
 // decompressBody decompresses the response body based on Content-Encoding header
 func decompressBody(body []byte, contentEncoding string) ([]byte, error) {
 	contentEncoding = strings.ToLower(strings.TrimSpace(contentEncoding))
@@ -228,6 +250,10 @@ func (ph *ProxyHandler) handleRegularResponse(
 	client := &http.Client{}
 	resp, err := client.Do(proxyReq)
 	if err != nil {
+		fmt.Printf("Error reaching provider: %v\n", err)
+		// Log error to database
+		ph.logErrorResponse(requestID, err, start)
+		// Return error to client
 		http.Error(w, fmt.Sprintf("Failed to reach provider: %v", err), http.StatusBadGateway)
 		return
 	}
@@ -338,6 +364,10 @@ func (ph *ProxyHandler) handleStreamingResponse(
 	client := &http.Client{}
 	resp, err := client.Do(proxyReq)
 	if err != nil {
+		fmt.Printf("Error reaching provider: %v\n", err)
+		// Log error to database
+		ph.logErrorResponse(requestID, err, start)
+		// Return error to client
 		http.Error(w, fmt.Sprintf("Failed to reach provider: %v", err), http.StatusBadGateway)
 		return
 	}
