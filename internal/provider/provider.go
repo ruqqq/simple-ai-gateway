@@ -1,6 +1,11 @@
 package provider
 
-import "net/http"
+import (
+	"net/http"
+
+	"github.com/ruqqq/simple-ai-gateway/internal/database"
+	"github.com/ruqqq/simple-ai-gateway/internal/storage"
+)
 
 // Provider defines the interface that all AI providers must implement
 type Provider interface {
@@ -23,4 +28,8 @@ type Provider interface {
 
 	// IsStreamingEndpoint checks if the given path is a streaming endpoint
 	IsStreamingEndpoint(path string) bool
+
+	// ProcessResponse handles post-response processing (e.g., downloading images)
+	// This is optional - providers can implement a no-op version if not needed
+	ProcessResponse(responseBody string, requestID, responseID string, fs *storage.FileStorage, db *database.DB) error
 }

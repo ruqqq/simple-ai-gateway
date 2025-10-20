@@ -297,8 +297,13 @@ func (ph *ProxyHandler) handleRegularResponse(
 			}
 		}
 
-		// Emit response created event asynchronously
+		// Call provider's post-response processing asynchronously
 		go func() {
+			if err := prov.ProcessResponse(string(decompressedBody), requestID, responseID, ph.storage, ph.db); err != nil {
+				fmt.Printf("Warning: provider post-response processing failed: %v\n", err)
+			}
+
+			// Emit response created event
 			storedResp, err := ph.db.GetResponse(responseID)
 			if err == nil && storedResp != nil {
 				ph.apiHandler.BroadcastResponseCreated(storedResp)

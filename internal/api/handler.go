@@ -164,14 +164,14 @@ func (h *Handler) GetRequest(w http.ResponseWriter, r *http.Request) {
 
 // GetFile handles GET /api/files/*
 func (h *Handler) GetFile(w http.ResponseWriter, r *http.Request) {
-	filePath := r.PathValue("path")
+	filePath := r.PathValue("*")
 	if filePath == "" {
 		h.writeError(w, http.StatusBadRequest, "missing file path")
 		return
 	}
 
 	// Security: prevent path traversal
-	if filepath.Clean(filePath) != filePath || filePath[0] == '/' {
+	if filepath.Clean(filePath) != filePath || len(filePath) > 0 && filePath[0] == '/' {
 		h.writeError(w, http.StatusBadRequest, "invalid file path")
 		return
 	}

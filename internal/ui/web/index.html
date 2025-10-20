@@ -30,7 +30,6 @@
                             <option value="">All Providers</option>
                             <option value="openai">OpenAI</option>
                             <option value="replicate">Replicate</option>
-                            <option value="anthropic">Anthropic</option>
                         </select>
                     </div>
 
@@ -71,7 +70,6 @@
                                 <option value="">All Providers</option>
                                 <option value="openai">OpenAI</option>
                                 <option value="replicate">Replicate</option>
-                                <option value="anthropic">Anthropic</option>
                             </select>
                         </div>
 
@@ -142,6 +140,7 @@
                 <button class="tab-btn active" data-tab="request">Request</button>
                 <button class="tab-btn" data-tab="response">Response</button>
                 <button class="tab-btn" data-tab="headers">Headers</button>
+                <button class="tab-btn" data-tab="preview">Preview</button>
                 <button class="tab-btn" data-tab="files">Binary Files</button>
             </div>
 
@@ -200,6 +199,13 @@
                             <label>Response Headers</label>
                             <pre id="detail-response-headers" class="code-block"><code></code></pre>
                         </div>
+                    </div>
+                </div>
+
+                <!-- Preview Tab -->
+                <div class="tab-pane" data-tab="preview">
+                    <div id="detail-preview-container" class="preview-container">
+                        <p class="no-data">No media found</p>
                     </div>
                 </div>
 

@@ -511,6 +511,67 @@ body {
     padding: 2rem;
 }
 
+/* Preview Container */
+.preview-container {
+    display: flex;
+    flex-direction: column;
+    gap: 2rem;
+}
+
+.preview-section {
+    border: 1px solid var(--color-border);
+    border-radius: 4px;
+    padding: 1rem;
+    background-color: var(--color-code-bg);
+}
+
+.preview-label {
+    font-weight: 600;
+    color: var(--color-text-secondary);
+    margin-bottom: 1rem;
+    text-transform: uppercase;
+    font-size: 0.75rem;
+    letter-spacing: 0.5px;
+}
+
+.preview-items {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+    gap: 1rem;
+}
+
+.preview-item {
+    border: 1px solid var(--color-border);
+    border-radius: 4px;
+    overflow: hidden;
+    background: white;
+    display: flex;
+    flex-direction: column;
+    box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1);
+}
+
+.preview-item-image {
+    width: 100%;
+    aspect-ratio: 1;
+    object-fit: cover;
+    background-color: var(--color-bg-light);
+}
+
+.preview-item-info {
+    padding: 0.75rem;
+    background: white;
+    border-top: 1px solid var(--color-border);
+    font-size: 0.75rem;
+    color: var(--color-text-secondary);
+}
+
+.preview-item-field {
+    font-family: 'Monaco', 'Courier New', monospace;
+    color: var(--color-text-primary);
+    font-weight: 500;
+    word-break: break-all;
+}
+
 /* Scrollbar Styling */
 ::-webkit-scrollbar {
     width: 8px;

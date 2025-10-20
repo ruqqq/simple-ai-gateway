@@ -4,6 +4,9 @@ import (
 	"fmt"
 	"net/http"
 	"strings"
+
+	"github.com/ruqqq/simple-ai-gateway/internal/database"
+	"github.com/ruqqq/simple-ai-gateway/internal/storage"
 )
 
 const (
@@ -83,4 +86,11 @@ func (p *OpenAIProvider) IsStreamingEndpoint(path string) bool {
 	}
 
 	return false
+}
+
+// ProcessResponse is a no-op for OpenAI
+// OpenAI responses don't need post-processing
+func (p *OpenAIProvider) ProcessResponse(responseBody string, requestID, responseID string, fs *storage.FileStorage, db *database.DB) error {
+	// No-op: OpenAI responses don't require post-processing
+	return nil
 }

@@ -1,9 +1,14 @@
 package provider
 
 import (
+	"encoding/json"
 	"fmt"
 	"net/http"
 	"strings"
+	"time"
+
+	"github.com/ruqqq/simple-ai-gateway/internal/database"
+	"github.com/ruqqq/simple-ai-gateway/internal/storage"
 )
 
 const (
@@ -87,4 +92,97 @@ func (p *ReplicateProvider) IsStreamingEndpoint(path string) bool {
 	}
 
 	return false
+}
+
+// ProcessResponse handles post-response processing for Replicate
+// Downloads and stores images from the output field locally
+func (p *ReplicateProvider) ProcessResponse(responseBody string, requestID, responseID string, fs *storage.FileStorage, db *database.DB) error {
+	// Parse the response JSON
+	var response map[string]interface{}
+	if err := json.Unmarshal([]byte(responseBody), &response); err != nil {
+		return fmt.Errorf("failed to parse response JSON: %w", err)
+	}
+
+	// Extract output field
+	output, exists := response["output"]
+	if !exists {
+		return nil // No output field, nothing to do
+	}
+
+	// Handle different output formats
+	var urls []string
+	switch v := output.(type) {
+	case string:
+		// Single URL
+		if isImageURL(v) {
+			urls = []string{v}
+		}
+	case []interface{}:
+		// Array of URLs
+		for _, item := range v {
+			if str, ok := item.(string); ok && isImageURL(str) {
+				urls = append(urls, str)
+			}
+		}
+	}
+
+	// Download and store each image
+	httpClient := &http.Client{
+		Timeout: 30 * time.Second,
+	}
+
+	for _, url := range urls {
+		if err := downloadAndStoreImage(url, requestID, responseID, fs, db, httpClient); err != nil {
+			fmt.Printf("Warning: failed to download/store image from %s: %v\n", url, err)
+			// Continue with other images if one fails
+		}
+	}
+
+	return nil
+}
+
+// Helper function to check if a string is an image URL
+func isImageURL(url string) bool {
+	if !strings.HasPrefix(url, "http://") && !strings.HasPrefix(url, "https://") {
+		return false
+	}
+	return strings.HasSuffix(strings.ToLower(url), ".png") ||
+		strings.HasSuffix(strings.ToLower(url), ".jpg") ||
+		strings.HasSuffix(strings.ToLower(url), ".jpeg") ||
+		strings.HasSuffix(strings.ToLower(url), ".gif") ||
+		strings.HasSuffix(strings.ToLower(url), ".webp")
+}
+
+// Helper function to download and store an image
+func downloadAndStoreImage(url, requestID, responseID string, fs *storage.FileStorage, db *database.DB, client *http.Client) error {
+	// Download the image
+	resp, err := client.Get(url)
+	if err != nil {
+		return fmt.Errorf("failed to download image: %w", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		return fmt.Errorf("download returned status %d", resp.StatusCode)
+	}
+
+	// Save to storage
+	contentType := resp.Header.Get("Content-Type")
+	if contentType == "" {
+		contentType = "image/png" // Default to PNG
+	}
+
+	filePath, size, err := fs.SaveFile("replicate", contentType, resp.Body)
+	if err != nil {
+		return fmt.Errorf("failed to save file: %w", err)
+	}
+
+	// Store binary file reference
+	_, err = db.StoreBinaryFile(requestID, responseID, filePath, contentType, size)
+	if err != nil {
+		return fmt.Errorf("failed to store binary file reference: %w", err)
+	}
+
+	fmt.Printf("Stored Replicate output image: %s (%d bytes)\n", filePath, size)
+	return nil
 }

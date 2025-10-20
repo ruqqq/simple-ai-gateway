@@ -175,14 +175,21 @@ function renderRequestDetails(detail) {
     const template = document.getElementById('details-template');
     const clone = template.content.cloneNode(true);
 
+    // Find media items from request/response bodies
+    const mediaItems = findBase64Media(detail);
+
     // Request tab
     clone.getElementById('detail-provider').textContent = detail.request.provider;
     clone.getElementById('detail-endpoint').textContent = detail.request.endpoint;
     clone.getElementById('detail-method').textContent = detail.request.method;
 
     const requestBody = detail.request.body || '';
+    const requestMediaItems = mediaItems.filter(m => m.source === 'request');
+    const displayRequestBody = requestMediaItems.length > 0
+        ? redactBase64FromJSON(requestBody, requestMediaItems)
+        : formatJSON(requestBody);
     clone.getElementById('detail-request-body').querySelector('code').textContent =
-        formatJSON(requestBody) || '(empty)';
+        displayRequestBody || '(empty)';
 
     // Response tab
     if (detail.response) {
@@ -190,8 +197,11 @@ function renderRequestDetails(detail) {
         clone.getElementById('detail-duration').textContent = `${detail.response.duration_ms}ms`;
 
         const responseBody = detail.response.body || '';
-        const formatted = formatJSON(responseBody) || '(empty)';
-        clone.getElementById('detail-response-body').querySelector('code').textContent = formatted;
+        const responseMediaItems = mediaItems.filter(m => m.source === 'response');
+        const displayResponseBody = responseMediaItems.length > 0
+            ? redactBase64FromJSON(responseBody, responseMediaItems)
+            : formatJSON(responseBody);
+        clone.getElementById('detail-response-body').querySelector('code').textContent = displayResponseBody || '(empty)';
 
         // Check if response is an image
         if (isImageResponse(detail.response)) {
@@ -229,6 +239,13 @@ function renderRequestDetails(detail) {
         });
     }
 
+    // Preview tab
+    const previewContainer = clone.getElementById('detail-preview-container');
+    if (mediaItems.length > 0) {
+        previewContainer.innerHTML = '';
+        renderMediaPreview(previewContainer, mediaItems);
+    }
+
     // Replace content
     container.innerHTML = '';
     container.appendChild(clone);
@@ -244,18 +261,25 @@ function createFileElement(file) {
     const template = document.getElementById('file-item-template');
     const clone = template.content.cloneNode(true);
 
-    clone.querySelector('.file-name').textContent = file.file_path;
+    // Make file path a clickable link
+    const fileNameEl = clone.querySelector('.file-name');
+    const link = document.createElement('a');
+    link.href = `/api/files/${file.file_path}`;
+    link.target = '_blank';
+    link.rel = 'noopener noreferrer';
+    link.textContent = file.file_path;
+    link.style.color = 'var(--color-primary)';
+    link.style.textDecoration = 'underline';
+    link.style.cursor = 'pointer';
+    fileNameEl.replaceChildren(link);
+
     clone.querySelector('.file-type').textContent = file.content_type;
     clone.querySelector('.file-size').textContent = `${formatSize(file.size)}`;
 
+    // Hide preview section - just show file info
     const preview = clone.querySelector('.file-preview');
-    if (isImageContentType(file.content_type)) {
-        const img = document.createElement('img');
-        img.src = `/api/files/${file.file_path}`;
-        img.alt = file.file_path;
-        preview.appendChild(img);
-    } else {
-        preview.innerHTML = '<p class="no-data">Binary file - not displayable in browser</p>';
+    if (preview) {
+        preview.style.display = 'none';
     }
 
     return clone;
@@ -571,6 +595,270 @@ function showDetailsLoading(show) {
     } else {
         container.classList.remove('loading');
     }
+}
+
+// Base64 Media Detection - Provider-Aware
+function findBase64Media(detail) {
+    const mediaItems = [];
+    const provider = detail.request?.provider || 'default';
+
+    try {
+        if (detail.request?.body) {
+            const requestMedia = extractMediaByProvider(detail.request.body, provider, 'request');
+            mediaItems.push(...requestMedia);
+        }
+        if (detail.response?.body) {
+            const responseMedia = extractMediaByProvider(detail.response.body, provider, 'response');
+            mediaItems.push(...responseMedia);
+        }
+    } catch (e) {
+        console.error('Error detecting media:', e);
+    }
+
+    // Add locally stored binary files
+    if (detail.binary_files && Array.isArray(detail.binary_files)) {
+        detail.binary_files.forEach(file => {
+            mediaItems.push({
+                url: `/api/files/${file.file_path}`,
+                field: `(Local file: ${file.file_path})`,
+                source: 'response',  // Binary files are from response
+                mediaType: file.content_type,
+                isUrl: true,
+                isLocalFile: true
+            });
+        });
+    }
+
+    return mediaItems;
+}
+
+function extractMediaByProvider(jsonString, provider, source) {
+    const mediaItems = [];
+
+    try {
+        const data = typeof jsonString === 'string' ? JSON.parse(jsonString) : jsonString;
+
+        if (provider === 'openai') {
+            extractOpenAIImages(data, source, mediaItems);
+        } else if (provider === 'replicate') {
+            extractReplicateImages(data, source, mediaItems);
+        }
+    } catch (e) {
+        // Invalid JSON, skip
+    }
+
+    return mediaItems;
+}
+
+function extractOpenAIImages(data, source, mediaItems) {
+    if (data.messages && Array.isArray(data.messages)) {
+        data.messages.forEach((msg, msgIdx) => {
+            if (msg.content && Array.isArray(msg.content)) {
+                msg.content.forEach((item, itemIdx) => {
+                    if (item.type === 'image_url' && item.image_url?.url) {
+                        const url = item.image_url.url;
+                        const match = url.match(/^data:([^;]+);base64,(.+)$/);
+                        if (match) {
+                            addMediaItem(mediaItems, match[2], match[1], `messages[${msgIdx}].content[${itemIdx}]`, source);
+                        }
+                    }
+                });
+            }
+        });
+    }
+}
+
+function extractReplicateImages(data, source, mediaItems) {
+    // Input images - Replicate uses different field names (input.image or input.input_image)
+    const inputFields = ['image', 'input_image'];
+    inputFields.forEach(fieldName => {
+        const inputImage = data.input?.[fieldName];
+        if (inputImage && typeof inputImage === 'string') {
+            // Check for data URI
+            const dataMatch = inputImage.match(/^data:([^;]+);base64,(.+)$/);
+            if (dataMatch) {
+                addMediaItem(mediaItems, dataMatch[2], dataMatch[1], `input.${fieldName}`, source);
+            } else if (inputImage.match(/^https?:\/\/.+\.(png|jpg|jpeg|gif|webp)$/i)) {
+                // Check for image URL
+                const ext = inputImage.split('.').pop().toLowerCase();
+                const mimeTypes = { png: 'image/png', jpg: 'image/jpeg', jpeg: 'image/jpeg', gif: 'image/gif', webp: 'image/webp' };
+                const mediaType = mimeTypes[ext] || 'image/png';
+                addMediaItem(mediaItems, inputImage, mediaType, `input.${fieldName}`, source, true);
+            }
+        }
+    });
+
+    // Output (can be string or array)
+    if (data.output) {
+        const outputs = Array.isArray(data.output) ? data.output : [data.output];
+        outputs.forEach((output, idx) => {
+            if (typeof output === 'string') {
+                const field = Array.isArray(data.output) ? `output[${idx}]` : 'output';
+
+                // Check for data URI
+                const dataMatch = output.match(/^data:([^;]+);base64,(.+)$/);
+                if (dataMatch) {
+                    addMediaItem(mediaItems, dataMatch[2], dataMatch[1], field, source);
+                } else if (output.match(/^https?:\/\/.+\.(png|jpg|jpeg|gif|webp)$/i)) {
+                    // Check for image URL
+                    const ext = output.split('.').pop().toLowerCase();
+                    const mimeTypes = { png: 'image/png', jpg: 'image/jpeg', jpeg: 'image/jpeg', gif: 'image/gif', webp: 'image/webp' };
+                    const mediaType = mimeTypes[ext] || 'image/png';
+                    addMediaItem(mediaItems, output, mediaType, field, source, true);
+                }
+            }
+        });
+    }
+}
+
+function addMediaItem(mediaItems, data, mediaType, field, source, isUrl = false) {
+    if (!data || data.length < 10) return;
+
+    if (isUrl) {
+        // For URLs, just store them as-is
+        mediaItems.push({
+            url: data,
+            field: field,
+            source: source,
+            mediaType: mediaType,
+            isUrl: true
+        });
+    } else {
+        // For base64 data
+        if (data.length < 50) return;
+
+        // Verify media type or guess from header
+        let detectedType = mediaType;
+        if (!mediaType || mediaType === 'image/png') {
+            try {
+                const bytes = atob(data.substring(0, 50));
+                if (bytes.charCodeAt(0) === 0x89 && bytes.charCodeAt(1) === 0x50) {
+                    detectedType = 'image/png';
+                } else if (bytes.charCodeAt(0) === 0xFF && bytes.charCodeAt(1) === 0xD8) {
+                    detectedType = 'image/jpeg';
+                } else if (bytes.substring(0, 3) === 'GIF') {
+                    detectedType = 'image/gif';
+                } else if (bytes.charCodeAt(0) === 0x52 && bytes.charCodeAt(1) === 0x49 && bytes.charCodeAt(2) === 0x46) {
+                    detectedType = 'image/webp';
+                }
+            } catch (e) {
+                // Default if parsing fails
+            }
+        }
+
+        mediaItems.push({
+            base64: data,
+            field: field,
+            source: source,
+            mediaType: detectedType,
+            dataUri: `data:${detectedType};base64,${data}`,
+            isUrl: false
+        });
+    }
+}
+
+function redactBase64FromJSON(jsonString, mediaItems) {
+    if (!mediaItems || mediaItems.length === 0 || !jsonString) return jsonString;
+
+    try {
+        const data = JSON.parse(jsonString);
+
+        // Redact all media items (caller already filtered by source)
+        mediaItems.forEach(item => {
+            if (!item.dataUri) return;
+
+            // Handle OpenAI format: messages[].content[].image_url.url
+            if (item.field.startsWith('messages')) {
+                const match = item.field.match(/messages\[(\d+)\]\.content\[(\d+)\]/);
+                if (match) {
+                    const msgIdx = parseInt(match[1]);
+                    const itemIdx = parseInt(match[2]);
+                    if (data.messages?.[msgIdx]?.content?.[itemIdx]?.image_url) {
+                        data.messages[msgIdx].content[itemIdx].image_url.url = `[BASE64_IMAGE_REDACTED - ${item.base64.length} bytes - See Preview tab]`;
+                    }
+                }
+            }
+
+            // Handle Replicate format: input.image or input.input_image
+            if (item.field === 'input.image' && data.input?.image) {
+                data.input.image = `[BASE64_IMAGE_REDACTED - ${item.base64.length} bytes - See Preview tab]`;
+            }
+            if (item.field === 'input.input_image' && data.input?.input_image) {
+                data.input.input_image = `[BASE64_IMAGE_REDACTED - ${item.base64.length} bytes - See Preview tab]`;
+            }
+            if (item.field === 'output' && data.output && typeof data.output === 'string') {
+                data.output = `[BASE64_IMAGE_REDACTED - ${item.base64.length} bytes - See Preview tab]`;
+            }
+            if (item.field.startsWith('output[') && Array.isArray(data.output)) {
+                const match = item.field.match(/output\[(\d+)\]/);
+                if (match) {
+                    const idx = parseInt(match[1]);
+                    data.output[idx] = `[BASE64_IMAGE_REDACTED - ${item.base64.length} bytes - See Preview tab]`;
+                }
+            }
+        });
+
+        return JSON.stringify(data, null, 2);
+    } catch (e) {
+        return jsonString;
+    }
+}
+
+function renderMediaPreview(container, mediaItems) {
+    // Group by source
+    const bySource = {};
+    mediaItems.forEach(item => {
+        if (!bySource[item.source]) {
+            bySource[item.source] = [];
+        }
+        bySource[item.source].push(item);
+    });
+
+    // Render each source group
+    Object.entries(bySource).forEach(([source, items]) => {
+        const section = document.createElement('div');
+        section.className = 'preview-section';
+
+        const label = document.createElement('div');
+        label.className = 'preview-label';
+        label.textContent = source === 'request' ? '📨 Request Media' : '📩 Response Media';
+        section.appendChild(label);
+
+        const itemsContainer = document.createElement('div');
+        itemsContainer.className = 'preview-items';
+
+        items.forEach(item => {
+            const previewItem = document.createElement('div');
+            previewItem.className = 'preview-item';
+
+            const img = document.createElement('img');
+            img.className = 'preview-item-image';
+            img.src = item.isUrl ? item.url : item.dataUri;
+            img.alt = item.field;
+            previewItem.appendChild(img);
+
+            const info = document.createElement('div');
+            info.className = 'preview-item-info';
+
+            const field = document.createElement('div');
+            field.className = 'preview-item-field';
+            field.textContent = item.field;
+            info.appendChild(field);
+
+            const type = document.createElement('div');
+            type.style.marginTop = '0.25rem';
+            type.style.fontSize = '0.7rem';
+            type.style.color = 'var(--color-text-secondary)';
+            type.textContent = item.mediaType;
+            info.appendChild(type);
+
+            previewItem.appendChild(info);
+            itemsContainer.appendChild(previewItem);
+        });
+
+        section.appendChild(itemsContainer);
+        container.appendChild(section);
+    });
 }
 
 // Cleanup on page unload
