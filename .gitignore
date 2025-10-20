@@ -35,4 +35,4 @@ data/
 !data/.gitkeep
 
 # Compiled binaries
-./gateway
+gateway
