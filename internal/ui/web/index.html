@@ -28,8 +28,7 @@
                         <label for="provider-filter">Provider</label>
                         <select id="provider-filter">
                             <option value="">All Providers</option>
-                            <option value="openai">OpenAI</option>
-                            <option value="replicate">Replicate</option>
+                            <!-- Options populated dynamically by providers.js -->
                         </select>
                     </div>
 
@@ -68,8 +67,7 @@
                             <label for="mobile-provider-filter">Provider</label>
                             <select id="mobile-provider-filter">
                                 <option value="">All Providers</option>
-                                <option value="openai">OpenAI</option>
-                                <option value="replicate">Replicate</option>
+                                <!-- Options populated dynamically by providers.js -->
                             </select>
                         </div>
 
@@ -238,6 +236,31 @@
         </div>
     </template>
 
+    <script src="/ui/providers.js"></script>
     <script src="/ui/app.js"></script>
+    <script>
+        // Dynamically populate provider filter dropdowns
+        document.addEventListener('DOMContentLoaded', () => {
+            const desktopProviderFilter = document.getElementById('provider-filter');
+            const mobileProviderFilter = document.getElementById('mobile-provider-filter');
+
+            // Clear existing options except the "All Providers" option
+            desktopProviderFilter.innerHTML = '<option value="">All Providers</option>';
+            mobileProviderFilter.innerHTML = '<option value="">All Providers</option>';
+
+            // Add options for each registered provider
+            providerRegistry.getAllAdapters().forEach(adapter => {
+                const desktopOption = document.createElement('option');
+                desktopOption.value = adapter.getName();
+                desktopOption.textContent = adapter.getDisplayName();
+                desktopProviderFilter.appendChild(desktopOption);
+
+                const mobileOption = document.createElement('option');
+                mobileOption.value = adapter.getName();
+                mobileOption.textContent = adapter.getDisplayName();
+                mobileProviderFilter.appendChild(mobileOption);
+            });
+        });
+    </script>
 </body>
 </html>

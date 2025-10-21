@@ -252,7 +252,7 @@ function renderRequestDetails(detail) {
     const requestBody = detail.request.body || '';
     const requestMediaItems = mediaItems.filter(m => m.source === 'request');
     const displayRequestBody = requestMediaItems.length > 0
-        ? redactBase64FromJSON(requestBody, requestMediaItems)
+        ? redactBase64FromJSON(requestBody, requestMediaItems, detail.request.provider)
         : formatJSON(requestBody);
     const requestBodyEl = clone.getElementById('detail-request-body');
     requestBodyEl.querySelector('code').textContent = displayRequestBody || '(empty)';
@@ -276,7 +276,7 @@ function renderRequestDetails(detail) {
         const responseBody = detail.response.body || '';
         const responseMediaItems = mediaItems.filter(m => m.source === 'response');
         const displayResponseBody = responseMediaItems.length > 0
-            ? redactBase64FromJSON(responseBody, responseMediaItems)
+            ? redactBase64FromJSON(responseBody, responseMediaItems, detail.request.provider)
             : formatJSON(responseBody);
         const responseBodyEl = clone.getElementById('detail-response-body');
         responseBodyEl.querySelector('code').textContent = displayResponseBody || '(empty)';
@@ -812,19 +812,24 @@ function showDetailsLoading(show) {
     }
 }
 
-// Base64 Media Detection - Provider-Aware
+// Base64 Media Detection - Provider-Aware (using adapter pattern)
 function findBase64Media(detail) {
     const mediaItems = [];
-    const provider = detail.request?.provider || 'default';
+    const providerName = detail.request?.provider || 'default';
+    const adapter = providerRegistry.getAdapter(providerName);
 
     try {
-        if (detail.request?.body) {
-            const requestMedia = extractMediaByProvider(detail.request.body, provider, 'request');
-            mediaItems.push(...requestMedia);
+        if (detail.request?.body && adapter) {
+            const data = typeof detail.request.body === 'string'
+                ? JSON.parse(detail.request.body)
+                : detail.request.body;
+            adapter.extractMedia(data, 'request', mediaItems);
         }
-        if (detail.response?.body) {
-            const responseMedia = extractMediaByProvider(detail.response.body, provider, 'response');
-            mediaItems.push(...responseMedia);
+        if (detail.response?.body && adapter) {
+            const data = typeof detail.response.body === 'string'
+                ? JSON.parse(detail.response.body)
+                : detail.response.body;
+            adapter.extractMedia(data, 'response', mediaItems);
         }
     } catch (e) {
         console.error('Error detecting media:', e);
@@ -847,287 +852,18 @@ function findBase64Media(detail) {
     return mediaItems;
 }
 
-function extractMediaByProvider(jsonString, provider, source) {
-    const mediaItems = [];
-
-    try {
-        const data = typeof jsonString === 'string' ? JSON.parse(jsonString) : jsonString;
-
-        if (provider === 'openai') {
-            extractOpenAIImages(data, source, mediaItems);
-        } else if (provider === 'replicate') {
-            extractReplicateImages(data, source, mediaItems);
-        }
-    } catch (e) {
-        // Invalid JSON, skip
-    }
-
-    return mediaItems;
-}
-
-function extractOpenAIImages(data, source, mediaItems) {
-    // Format 1: Chat Completions API - messages[].content[].image_url.url
-    if (data.messages && Array.isArray(data.messages)) {
-        data.messages.forEach((msg, msgIdx) => {
-            if (msg.content && Array.isArray(msg.content)) {
-                msg.content.forEach((item, itemIdx) => {
-                    if (item.type === 'image_url' && item.image_url?.url) {
-                        const url = item.image_url.url;
-                        const match = url.match(/^data:([^;]*);base64,(.+)$/);
-                        if (match) {
-                            addMediaItem(mediaItems, match[2], match[1], `messages[${msgIdx}].content[${itemIdx}].image_url.url`, source);
-                        }
-                    }
-                });
-            }
-        });
-    }
-
-    // Format 2: Responses API (request) - input[].content[].image_url where type='input_image'
-    if (data.input && Array.isArray(data.input)) {
-        data.input.forEach((msg, msgIdx) => {
-            if (msg.content && Array.isArray(msg.content)) {
-                msg.content.forEach((item, itemIdx) => {
-                    if (item.type === 'input_image' && item.image_url) {
-                        const url = item.image_url;
-                        const match = url.match(/^data:([^;]*);base64,(.+)$/);
-                        if (match) {
-                            addMediaItem(mediaItems, match[2], match[1], `input[${msgIdx}].content[${itemIdx}].image_url`, source);
-                        } else if (url.match(/^https?:\/\/.+\.(png|jpg|jpeg|gif|webp)$/i)) {
-                            // Check for image URL
-                            const ext = url.split('.').pop().toLowerCase();
-                            const mimeTypes = { png: 'image/png', jpg: 'image/jpeg', jpeg: 'image/jpeg', gif: 'image/gif', webp: 'image/webp' };
-                            const mediaType = mimeTypes[ext] || 'image/png';
-                            addMediaItem(mediaItems, url, mediaType, `input[${msgIdx}].content[${itemIdx}].image_url`, source, true);
-                        }
-                    }
-                });
-            }
-        });
-    }
-
-    // Format 3: Responses API (response) - output[].result where type='image_generation_call'
-    if (data.output && Array.isArray(data.output)) {
-        data.output.forEach((item, idx) => {
-            if (item.type === 'image_generation_call' && item.result && typeof item.result === 'string') {
-                const result = item.result;
-                const match = result.match(/^data:([^;]*);base64,(.+)$/);
-                if (match) {
-                    addMediaItem(mediaItems, match[2], match[1], `output[${idx}].result`, source);
-                } else if (result.startsWith('iVBOR') || result.startsWith('/9j/')) {
-                    // Handle base64 without data URI prefix (common with OpenAI responses)
-                    // iVBOR = PNG header, /9j/ = JPEG header
-                    let mediaType = 'image/png';
-                    if (result.startsWith('/9j/')) {
-                        mediaType = 'image/jpeg';
-                    }
-                    addMediaItem(mediaItems, result, mediaType, `output[${idx}].result`, source);
-                }
-            }
-        });
-    }
-}
-
-function extractReplicateImages(data, source, mediaItems) {
-    // Input images - Replicate uses different field names (input.image or input.input_image)
-    const inputFields = ['image', 'input_image'];
-    inputFields.forEach(fieldName => {
-        const inputImage = data.input?.[fieldName];
-        if (inputImage && typeof inputImage === 'string') {
-            // Check for data URI (media type is optional - make it handle malformed data URIs like "data:;base64,...")
-            const dataMatch = inputImage.match(/^data:([^;]*);base64,(.+)$/);
-            if (dataMatch) {
-                addMediaItem(mediaItems, dataMatch[2], dataMatch[1], `input.${fieldName}`, source);
-            } else if (inputImage.match(/^https?:\/\/.+\.(png|jpg|jpeg|gif|webp)$/i)) {
-                // Check for image URL
-                const ext = inputImage.split('.').pop().toLowerCase();
-                const mimeTypes = { png: 'image/png', jpg: 'image/jpeg', jpeg: 'image/jpeg', gif: 'image/gif', webp: 'image/webp' };
-                const mediaType = mimeTypes[ext] || 'image/png';
-                addMediaItem(mediaItems, inputImage, mediaType, `input.${fieldName}`, source, true);
-            }
-        }
-    });
-
-    // Handle input_images array (plural)
-    if (Array.isArray(data.input?.input_images)) {
-        data.input.input_images.forEach((inputImage, idx) => {
-            if (inputImage && typeof inputImage === 'string') {
-                // Check for data URI (media type is optional - make it handle malformed data URIs like "data:;base64,...")
-                const dataMatch = inputImage.match(/^data:([^;]*);base64,(.+)$/);
-                if (dataMatch) {
-                    addMediaItem(mediaItems, dataMatch[2], dataMatch[1], `input.input_images[${idx}]`, source);
-                } else if (inputImage.match(/^https?:\/\/.+\.(png|jpg|jpeg|gif|webp)$/i)) {
-                    // Check for image URL
-                    const ext = inputImage.split('.').pop().toLowerCase();
-                    const mimeTypes = { png: 'image/png', jpg: 'image/jpeg', jpeg: 'image/jpeg', gif: 'image/gif', webp: 'image/webp' };
-                    const mediaType = mimeTypes[ext] || 'image/png';
-                    addMediaItem(mediaItems, inputImage, mediaType, `input.input_images[${idx}]`, source, true);
-                }
-            }
-        });
-    }
-
-    // Output (can be string or array)
-    if (data.output) {
-        const outputs = Array.isArray(data.output) ? data.output : [data.output];
-        outputs.forEach((output, idx) => {
-            if (typeof output === 'string') {
-                const field = Array.isArray(data.output) ? `output[${idx}]` : 'output';
-
-                // Check for data URI (media type is optional - make it handle malformed data URIs like "data:;base64,...")
-                const dataMatch = output.match(/^data:([^;]*);base64,(.+)$/);
-                if (dataMatch) {
-                    addMediaItem(mediaItems, dataMatch[2], dataMatch[1], field, source);
-                } else if (output.match(/^https?:\/\/.+\.(png|jpg|jpeg|gif|webp)$/i)) {
-                    // Check for image URL
-                    const ext = output.split('.').pop().toLowerCase();
-                    const mimeTypes = { png: 'image/png', jpg: 'image/jpeg', jpeg: 'image/jpeg', gif: 'image/gif', webp: 'image/webp' };
-                    const mediaType = mimeTypes[ext] || 'image/png';
-                    addMediaItem(mediaItems, output, mediaType, field, source, true);
-                }
-            }
-        });
-    }
-}
-
-function detectMediaTypeFromBase64(base64Data) {
-    // Detect media type from base64 magic bytes/signatures
-    try {
-        const bytes = atob(base64Data.substring(0, 50));
-        if (bytes.charCodeAt(0) === 0x89 && bytes.charCodeAt(1) === 0x50) {
-            return 'image/png';
-        } else if (bytes.charCodeAt(0) === 0xFF && bytes.charCodeAt(1) === 0xD8) {
-            return 'image/jpeg';
-        } else if (bytes.substring(0, 3) === 'GIF') {
-            return 'image/gif';
-        } else if (bytes.charCodeAt(0) === 0x52 && bytes.charCodeAt(1) === 0x49 && bytes.charCodeAt(2) === 0x46) {
-            return 'image/webp';
-        }
-    } catch (e) {
-        // Default if parsing fails
-    }
-    return 'image/png'; // Default fallback
-}
-
-function addMediaItem(mediaItems, data, mediaType, field, source, isUrl = false) {
-    if (!data || data.length < 10) return;
-
-    if (isUrl) {
-        // For URLs, just store them as-is
-        mediaItems.push({
-            url: data,
-            field: field,
-            source: source,
-            mediaType: mediaType,
-            isUrl: true
-        });
-    } else {
-        // For base64 data
-        if (data.length < 50) return;
-
-        // Verify media type or guess from header
-        let detectedType = mediaType;
-        if (!mediaType || mediaType.length === 0) {
-            // Media type is empty, detect from base64 header
-            detectedType = detectMediaTypeFromBase64(data);
-        } else if (mediaType === 'image/png') {
-            // If explicitly PNG, verify or detect
-            try {
-                const bytes = atob(data.substring(0, 50));
-                if (bytes.charCodeAt(0) === 0x89 && bytes.charCodeAt(1) === 0x50) {
-                    detectedType = 'image/png';
-                } else if (bytes.charCodeAt(0) === 0xFF && bytes.charCodeAt(1) === 0xD8) {
-                    detectedType = 'image/jpeg';
-                } else if (bytes.substring(0, 3) === 'GIF') {
-                    detectedType = 'image/gif';
-                } else if (bytes.charCodeAt(0) === 0x52 && bytes.charCodeAt(1) === 0x49 && bytes.charCodeAt(2) === 0x46) {
-                    detectedType = 'image/webp';
-                }
-            } catch (e) {
-                // Default if parsing fails
-            }
-        }
-
-        mediaItems.push({
-            base64: data,
-            field: field,
-            source: source,
-            mediaType: detectedType,
-            dataUri: `data:${detectedType};base64,${data}`,
-            isUrl: false
-        });
-    }
-}
-
-function redactBase64FromJSON(jsonString, mediaItems) {
+function redactBase64FromJSON(jsonString, mediaItems, providerName) {
     if (!mediaItems || mediaItems.length === 0 || !jsonString) return jsonString;
+
+    const adapter = providerRegistry.getAdapter(providerName);
+    if (!adapter) return formatJSON(jsonString);
 
     try {
         const data = JSON.parse(jsonString);
 
-        // Redact all media items (caller already filtered by source)
+        // Redact all media items using the provider adapter
         mediaItems.forEach(item => {
-            if (!item.dataUri) return;
-
-            // Handle OpenAI Chat Completions format: messages[].content[].image_url.url
-            if (item.field.startsWith('messages[')) {
-                const match = item.field.match(/messages\[(\d+)\]\.content\[(\d+)\]\.image_url\.url/);
-                if (match) {
-                    const msgIdx = parseInt(match[1]);
-                    const itemIdx = parseInt(match[2]);
-                    if (data.messages?.[msgIdx]?.content?.[itemIdx]?.image_url) {
-                        data.messages[msgIdx].content[itemIdx].image_url.url = `[BASE64_IMAGE_REDACTED - ${item.base64.length} bytes - See Preview tab]`;
-                    }
-                }
-            }
-
-            // Handle OpenAI Responses API (request) format: input[].content[].image_url
-            if (item.field.startsWith('input[') && item.field.includes('.content[') && item.field.includes('.image_url')) {
-                const match = item.field.match(/input\[(\d+)\]\.content\[(\d+)\]\.image_url/);
-                if (match) {
-                    const msgIdx = parseInt(match[1]);
-                    const itemIdx = parseInt(match[2]);
-                    if (Array.isArray(data.input) && data.input[msgIdx]?.content?.[itemIdx]?.image_url) {
-                        data.input[msgIdx].content[itemIdx].image_url = `[BASE64_IMAGE_REDACTED - ${item.base64.length} bytes - See Preview tab]`;
-                    }
-                }
-            }
-
-            // Handle OpenAI Responses API (response) format: output[].result
-            if (item.field.startsWith('output[') && item.field.includes('.result')) {
-                const match = item.field.match(/output\[(\d+)\]\.result/);
-                if (match) {
-                    const idx = parseInt(match[1]);
-                    if (Array.isArray(data.output) && data.output[idx] && data.output[idx].result) {
-                        data.output[idx].result = `[BASE64_IMAGE_REDACTED - ${item.base64.length} bytes - See Preview tab]`;
-                    }
-                }
-            }
-
-            // Handle Replicate format: input.image or input.input_image
-            if (item.field === 'input.image' && data.input?.image) {
-                data.input.image = `[BASE64_IMAGE_REDACTED - ${item.base64.length} bytes - See Preview tab]`;
-            }
-            if (item.field === 'input.input_image' && data.input?.input_image) {
-                data.input.input_image = `[BASE64_IMAGE_REDACTED - ${item.base64.length} bytes - See Preview tab]`;
-            }
-            if (item.field.startsWith('input.input_images[') && Array.isArray(data.input?.input_images)) {
-                const match = item.field.match(/input\.input_images\[(\d+)\]/);
-                if (match) {
-                    const idx = parseInt(match[1]);
-                    data.input.input_images[idx] = `[BASE64_IMAGE_REDACTED - ${item.base64.length} bytes - See Preview tab]`;
-                }
-            }
-            if (item.field === 'output' && data.output && typeof data.output === 'string') {
-                data.output = `[BASE64_IMAGE_REDACTED - ${item.base64.length} bytes - See Preview tab]`;
-            }
-            if (item.field.startsWith('output[') && !item.field.includes('.result') && Array.isArray(data.output)) {
-                const match = item.field.match(/output\[(\d+)\](?!\.)/);
-                if (match) {
-                    const idx = parseInt(match[1]);
-                    data.output[idx] = `[BASE64_IMAGE_REDACTED - ${item.base64.length} bytes - See Preview tab]`;
-                }
-            }
+            adapter.redactMediaField(data, item);
         });
 
         return JSON.stringify(data, null, 2);
