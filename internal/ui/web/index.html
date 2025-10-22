@@ -11,9 +11,18 @@
         <!-- Header -->
         <header class="header">
             <h1>AI Gateway Dashboard</h1>
-            <div class="connection-status">
-                <span id="status-indicator" class="status-disconnected"></span>
-                <span id="status-text">Connecting...</span>
+            <div class="header-controls">
+                <!-- Override Mode Toggle -->
+                <div class="override-mode-toggle">
+                    <label for="override-mode-input">Override Mode</label>
+                    <input type="checkbox" id="override-mode-input" class="toggle-switch">
+                    <span id="override-mode-label" class="override-mode-label">OFF</span>
+                </div>
+                <!-- Connection Status -->
+                <div class="connection-status">
+                    <span id="status-indicator" class="status-disconnected"></span>
+                    <span id="status-text">Connecting...</span>
+                </div>
             </div>
         </header>
 
@@ -133,6 +142,19 @@
 
     <template id="details-template">
         <div class="details-content">
+            <!-- Approval Banner and Actions (shown when pending approval) -->
+            <div id="approval-banner" class="approval-banner" style="display: none;">
+                <div class="approval-content">
+                    <span class="approval-text">⏳ Pending Approval - Choose action:</span>
+                    <div class="approval-actions">
+                        <button id="approve-btn" class="btn btn-success">✅ Approve</button>
+                        <button id="error-400-btn" class="btn btn-warning">⚠️ Error 400</button>
+                        <button id="error-500-btn" class="btn btn-danger">❌ Error 500</button>
+                        <button id="content-sensitive-btn" class="btn btn-content-sensitive">🚫 Content Sensitive</button>
+                    </div>
+                </div>
+            </div>
+
             <!-- Tabs -->
             <div class="tabs">
                 <button class="tab-btn active" data-tab="request">Request</button>

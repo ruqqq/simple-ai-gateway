@@ -22,6 +22,7 @@ const app = {
 // Initialize app
 document.addEventListener('DOMContentLoaded', () => {
     initializeEventListeners();
+    fetchOverrideStatus();  // Sync override mode state on page load
     loadRequests();
     connectSSE();
 });
@@ -44,10 +45,35 @@ function initializeEventListeners() {
     if (mobileApplyBtn) mobileApplyBtn.addEventListener('click', applyMobileFilters);
     if (mobileClearBtn) mobileClearBtn.addEventListener('click', clearMobileFilters);
 
+    // Override mode toggle
+    const overrideModeInput = document.getElementById('override-mode-input');
+    if (overrideModeInput) {
+        overrideModeInput.addEventListener('change', handleOverrideModeToggle);
+    }
+
     // Tab buttons
     document.querySelectorAll('.tab-btn').forEach(btn => {
         btn.addEventListener('click', (e) => switchTab(e.target.dataset.tab));
     });
+
+    // Initialize approval action buttons (will be bound when details are loaded)
+    // These will be set up in the selectRequest function
+}
+
+// Fetch and sync override mode status on page load
+async function fetchOverrideStatus() {
+    try {
+        const response = await fetch('/api/override/status');
+        if (response.ok) {
+            const data = await response.json();
+            updateOverrideModeUI(data.enabled);
+        } else {
+            console.warn('Failed to fetch override status');
+        }
+    } catch (error) {
+        console.warn('Error fetching override status:', error);
+        // Don't block page load if this fails - it's non-critical
+    }
 }
 
 // Load requests from API
@@ -343,6 +369,16 @@ function renderRequestDetails(detail) {
         if (filesPane) filesPane.style.display = 'none';
     }
 
+    // Handle approval banner (before appending to container)
+    const approvalBanner = clone.getElementById('approval-banner');
+    if (approvalBanner) {
+        if (detail.request.approval_status === 'pending_approval') {
+            approvalBanner.style.display = 'block';
+        } else {
+            approvalBanner.style.display = 'none';
+        }
+    }
+
     // Replace content
     container.innerHTML = '';
     container.appendChild(clone);
@@ -354,6 +390,11 @@ function renderRequestDetails(detail) {
 
     // Attach copy button listeners
     attachCopyButtonListeners(container, detail);
+
+    // Setup approval action handlers (after appending to container)
+    if (detail.request.approval_status === 'pending_approval') {
+        setupApprovalActionHandlers(detail.request.id);
+    }
 }
 
 // Create file element
@@ -517,6 +558,54 @@ function connectSSE() {
             updateRequestStatus(data.request_id, data.status_code, data.is_error || false, data.error_message || '');
 
             // Auto-reload details if this response is for the currently selected request
+            if (data.request_id === app.selectedRequestId) {
+                loadRequestDetails(data.request_id);
+            }
+        });
+
+        // Handle override mode changes
+        app.eventSource.addEventListener('override_mode_changed', (event) => {
+            const data = JSON.parse(event.data).data;
+            updateOverrideModeUI(data.enabled);
+        });
+
+        // Handle request pending approval
+        app.eventSource.addEventListener('request_pending_approval', (event) => {
+            const data = JSON.parse(event.data).data;
+
+            // Play notification beep
+            playNotificationBeep();
+
+            // Add visual indicator to request in list
+            addPendingApprovalIndicator(data.request_id);
+
+            // Reload the specific request to show pending status
+            if (data.request_id === app.selectedRequestId) {
+                loadRequestDetails(data.request_id);
+            }
+        });
+
+        // Handle request approved
+        app.eventSource.addEventListener('request_approved', (event) => {
+            const data = JSON.parse(event.data).data;
+
+            // Remove pending approval indicator
+            removePendingApprovalIndicator(data.request_id);
+
+            // Reload details if this is the selected request
+            if (data.request_id === app.selectedRequestId) {
+                loadRequestDetails(data.request_id);
+            }
+        });
+
+        // Handle request overridden
+        app.eventSource.addEventListener('request_overridden', (event) => {
+            const data = JSON.parse(event.data).data;
+
+            // Remove pending approval indicator
+            removePendingApprovalIndicator(data.request_id);
+
+            // Reload details if this is the selected request
             if (data.request_id === app.selectedRequestId) {
                 loadRequestDetails(data.request_id);
             }
@@ -1191,6 +1280,209 @@ function renderMediaPreview(container, mediaItems) {
         section.appendChild(itemsContainer);
         container.appendChild(section);
     });
+}
+
+// Override Mode Handler
+async function handleOverrideModeToggle(e) {
+    const isChecked = e.target.checked;
+    try {
+        const response = await fetch('/api/override/toggle', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json'
+            }
+        });
+
+        if (!response.ok) throw new Error('Failed to toggle override mode');
+
+        const data = await response.json();
+        updateOverrideModeUI(data.enabled);
+    } catch (error) {
+        console.error('Error toggling override mode:', error);
+        // Reset checkbox on error
+        e.target.checked = !isChecked;
+        showError('Failed to toggle override mode');
+    }
+}
+
+function updateOverrideModeUI(enabled) {
+    const modeLabel = document.getElementById('override-mode-label');
+    const modeInput = document.getElementById('override-mode-input');
+    if (modeLabel) {
+        modeLabel.textContent = enabled ? 'ON' : 'OFF';
+        modeLabel.style.color = enabled ? 'var(--color-warning)' : 'var(--color-text)';
+    }
+    if (modeInput) {
+        modeInput.checked = enabled;
+    }
+}
+
+// Approval Action Handlers
+function setupApprovalActionHandlers(requestId) {
+    const approveBtn = document.getElementById('approve-btn');
+    const error400Btn = document.getElementById('error-400-btn');
+    const error500Btn = document.getElementById('error-500-btn');
+    const contentSensitiveBtn = document.getElementById('content-sensitive-btn');
+
+    if (approveBtn) {
+        approveBtn.onclick = () => handleRequestApproval(requestId);
+    }
+    if (error400Btn) {
+        error400Btn.onclick = () => handleRequestOverride(requestId, 'error_400');
+    }
+    if (error500Btn) {
+        error500Btn.onclick = () => handleRequestOverride(requestId, 'error_500');
+    }
+    if (contentSensitiveBtn) {
+        contentSensitiveBtn.onclick = () => handleRequestOverride(requestId, 'content_sensitive');
+    }
+}
+
+async function handleRequestApproval(requestId) {
+    try {
+        const response = await fetch(`/api/requests/${requestId}/approve`, {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json'
+            }
+        });
+
+        if (!response.ok) {
+            const error = await response.json();
+            throw new Error(error.error || 'Failed to approve request');
+        }
+
+        // Hide approval banner and reload details
+        const banner = document.getElementById('approval-banner');
+        if (banner) banner.style.display = 'none';
+
+        // Reload the selected request to show it's approved
+        if (app.selectedRequestId) {
+            loadRequestDetails(app.selectedRequestId);
+        }
+        showSuccess('Request approved');
+    } catch (error) {
+        console.error('Error approving request:', error);
+        showError(error.message || 'Failed to approve request');
+    }
+}
+
+async function handleRequestOverride(requestId, action) {
+    try {
+        const response = await fetch(`/api/requests/${requestId}/override`, {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json'
+            },
+            body: JSON.stringify({ action })
+        });
+
+        if (!response.ok) {
+            const error = await response.json();
+            throw new Error(error.error || 'Failed to override request');
+        }
+
+        // Hide approval banner and reload details
+        const banner = document.getElementById('approval-banner');
+        if (banner) banner.style.display = 'none';
+
+        // Reload the selected request to show the override response
+        if (app.selectedRequestId) {
+            loadRequestDetails(app.selectedRequestId);
+        }
+        showSuccess(`Request overridden with ${action}`);
+    } catch (error) {
+        console.error('Error overriding request:', error);
+        showError(error.message || 'Failed to override request');
+    }
+}
+
+// Update SSE message handlers
+function setupSSEMessageHandlers() {
+    // This function is called after app.eventSource is created
+    // We need to add handlers for the new approval events in the handleSSEMessage function
+}
+
+// Notification System - Audio Beep
+function playNotificationBeep() {
+    try {
+        // Create audio context
+        const audioContext = new (window.AudioContext || window.webkitAudioContext)();
+
+        // Create oscillator for beep sound
+        const oscillator = audioContext.createOscillator();
+        const gainNode = audioContext.createGain();
+
+        // Connect nodes
+        oscillator.connect(gainNode);
+        gainNode.connect(audioContext.destination);
+
+        // Set beep parameters
+        oscillator.frequency.setValueAtTime(1000, audioContext.currentTime); // 1000 Hz
+        gainNode.gain.setValueAtTime(0.3, audioContext.currentTime); // 30% volume
+        gainNode.gain.exponentialRampToValueAtTime(0.01, audioContext.currentTime + 0.2); // Fade out over 200ms
+
+        // Play beep
+        oscillator.start(audioContext.currentTime);
+        oscillator.stop(audioContext.currentTime + 0.2); // 200ms duration
+    } catch (error) {
+        console.log('Audio notification not available:', error.message);
+        // Silently fail - audio may not be available in some environments
+    }
+}
+
+// Visual Indicator for Pending Approval
+function addPendingApprovalIndicator(requestId) {
+    const requestItem = document.querySelector(`[data-id="${requestId}"]`);
+    if (!requestItem) return;
+
+    // Check if badge already exists
+    if (requestItem.querySelector('.pending-approval-badge')) {
+        return;
+    }
+
+    // Create pending approval badge
+    const badge = document.createElement('span');
+    badge.className = 'pending-approval-badge';
+    badge.textContent = '⏳ APPROVAL NEEDED';
+    badge.title = 'Request is pending approval';
+
+    // Also update status badge
+    const statusBadge = requestItem.querySelector('.status-badge');
+    if (statusBadge) {
+        statusBadge.style.display = 'none';
+    }
+
+    // Insert badge at the position where status badge was
+    const timestamp = requestItem.querySelector('.request-timestamp');
+    if (timestamp) {
+        timestamp.parentNode.insertBefore(badge, timestamp);
+    } else {
+        requestItem.appendChild(badge);
+    }
+}
+
+function removePendingApprovalIndicator(requestId) {
+    const requestItem = document.querySelector(`[data-id="${requestId}"]`);
+    if (!requestItem) return;
+
+    // Remove pending approval badge
+    const badge = requestItem.querySelector('.pending-approval-badge');
+    if (badge) {
+        badge.remove();
+    }
+
+    // Show status badge again
+    const statusBadge = requestItem.querySelector('.status-badge');
+    if (statusBadge) {
+        statusBadge.style.display = '';
+    }
+}
+
+// Success notification helper
+function showSuccess(message) {
+    console.log(message);
+    // Could be enhanced with toast notifications
 }
 
 // Cleanup on page unload
