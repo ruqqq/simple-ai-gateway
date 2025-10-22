@@ -7,13 +7,16 @@ import (
 
 // Request represents a stored API request
 type Request struct {
-	ID        string            `json:"id"`
-	Provider  string            `json:"provider"`
-	Endpoint  string            `json:"endpoint"`
-	Method    string            `json:"method"`
-	Headers   map[string]string `json:"headers"`
-	Body      string            `json:"body"`
-	CreatedAt time.Time         `json:"created_at"`
+	ID               string            `json:"id"`
+	Provider         string            `json:"provider"`
+	Endpoint         string            `json:"endpoint"`
+	Method           string            `json:"method"`
+	Headers          map[string]string `json:"headers"`
+	Body             string            `json:"body"`
+	ApprovalStatus   string            `json:"approval_status"`
+	OverrideAction   *string           `json:"override_action,omitempty"`
+	ApprovedAt       *time.Time        `json:"approved_at,omitempty"`
+	CreatedAt        time.Time         `json:"created_at"`
 }
 
 // Response represents a stored API response
@@ -42,11 +45,12 @@ type BinaryFile struct {
 
 // StoreRequestInput is input for storing a request
 type StoreRequestInput struct {
-	Provider string
-	Endpoint string
-	Method   string
-	Headers  map[string]string
-	Body     string
+	Provider       string
+	Endpoint       string
+	Method         string
+	Headers        map[string]string
+	Body           string
+	ApprovalStatus string // "approved" or "pending_approval"
 }
 
 // StoreResponseInput is input for storing a response

@@ -7,10 +7,12 @@ import (
 	"os"
 	"path/filepath"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/google/uuid"
 	"github.com/ruqqq/simple-ai-gateway/internal/database"
+	"github.com/ruqqq/simple-ai-gateway/internal/override"
 	"github.com/ruqqq/simple-ai-gateway/internal/storage"
 )
 
@@ -292,6 +294,189 @@ func (h *Handler) BroadcastResponseCreated(resp *database.Response) {
 	}
 
 	h.broadcaster.BroadcastEvent(event)
+}
+
+// BroadcastRequestPendingApproval broadcasts when a request is pending approval
+func (h *Handler) BroadcastRequestPendingApproval(requestID, provider, endpoint string) {
+	event := &EventMessage{
+		Type: "request_pending_approval",
+		Data: map[string]interface{}{
+			"request_id": requestID,
+			"provider":   provider,
+			"endpoint":   endpoint,
+		},
+	}
+
+	h.broadcaster.BroadcastEvent(event)
+}
+
+// Override Mode Handlers
+
+// ToggleOverride handles POST /api/override/toggle
+func (h *Handler) ToggleOverride(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		h.writeError(w, http.StatusMethodNotAllowed, "Method not allowed")
+		return
+	}
+
+	mgr := override.GetManager()
+	if mgr.IsEnabled() {
+		mgr.Disable()
+		fmt.Println("Override Mode: DISABLED")
+	} else {
+		mgr.Enable()
+		fmt.Println("Override Mode: ENABLED - All incoming requests will require approval")
+	}
+
+	// Broadcast the mode change event
+	event := &EventMessage{
+		Type: "override_mode_changed",
+		Data: map[string]interface{}{
+			"enabled": mgr.IsEnabled(),
+		},
+	}
+	h.broadcaster.BroadcastEvent(event)
+
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusOK)
+	json.NewEncoder(w).Encode(map[string]interface{}{
+		"enabled": mgr.IsEnabled(),
+	})
+}
+
+// GetOverrideStatus handles GET /api/override/status
+func (h *Handler) GetOverrideStatus(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		h.writeError(w, http.StatusMethodNotAllowed, "Method not allowed")
+		return
+	}
+
+	mgr := override.GetManager()
+
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusOK)
+	json.NewEncoder(w).Encode(map[string]interface{}{
+		"enabled":       mgr.IsEnabled(),
+		"pending_count": mgr.GetPendingCount(),
+	})
+}
+
+// ApproveRequest handles POST /api/requests/{id}/approve
+func (h *Handler) ApproveRequest(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		h.writeError(w, http.StatusMethodNotAllowed, "Method not allowed")
+		return
+	}
+
+	// Extract request ID from path: /api/requests/{id}/approve
+	parts := strings.Split(strings.TrimPrefix(r.URL.Path, "/api/requests/"), "/")
+	if len(parts) < 2 {
+		h.writeError(w, http.StatusBadRequest, "Invalid request ID")
+		return
+	}
+	requestID := parts[0]
+
+	mgr := override.GetManager()
+	if !mgr.Approve(requestID) {
+		h.writeError(w, http.StatusBadRequest, "Request not pending approval")
+		return
+	}
+
+	fmt.Printf("Override Mode: Request %s approved\n", requestID)
+
+	// Update DB to mark as approved
+	if err := h.db.ApproveRequest(requestID); err != nil {
+		fmt.Printf("Warning: failed to update request approval status: %v\n", err)
+	}
+
+	// Broadcast approval event
+	event := &EventMessage{
+		Type: "request_approved",
+		Data: map[string]interface{}{
+			"request_id": requestID,
+		},
+	}
+	h.broadcaster.BroadcastEvent(event)
+
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusOK)
+	json.NewEncoder(w).Encode(map[string]interface{}{
+		"request_id": requestID,
+		"status":     "approved",
+	})
+}
+
+// OverrideRequestAction handles POST /api/requests/{id}/override
+func (h *Handler) OverrideRequestAction(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		h.writeError(w, http.StatusMethodNotAllowed, "Method not allowed")
+		return
+	}
+
+	// Extract request ID from path: /api/requests/{id}/override
+	parts := strings.Split(strings.TrimPrefix(r.URL.Path, "/api/requests/"), "/")
+	if len(parts) < 2 {
+		h.writeError(w, http.StatusBadRequest, "Invalid request ID")
+		return
+	}
+	requestID := parts[0]
+
+	// Parse request body
+	var req struct {
+		Action string `json:"action"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		h.writeError(w, http.StatusBadRequest, "Invalid request body")
+		return
+	}
+
+	// Validate action
+	var decision override.ApprovalDecision
+	var dbAction string
+	switch req.Action {
+	case "error_400":
+		decision = override.ApprovalError400
+		dbAction = "error_400"
+	case "error_500":
+		decision = override.ApprovalError500
+		dbAction = "error_500"
+	case "content_sensitive":
+		decision = override.ApprovalContentSensitive
+		dbAction = "content_sensitive"
+	default:
+		h.writeError(w, http.StatusBadRequest, "Invalid action: must be error_400, error_500, or content_sensitive")
+		return
+	}
+
+	mgr := override.GetManager()
+	if !mgr.Override(requestID, decision) {
+		h.writeError(w, http.StatusBadRequest, "Request not pending approval")
+		return
+	}
+
+	fmt.Printf("Override Mode: Request %s overridden with %s\n", requestID, dbAction)
+
+	// Update DB to mark as overridden
+	if err := h.db.OverrideRequest(requestID, dbAction); err != nil {
+		fmt.Printf("Warning: failed to update request override status: %v\n", err)
+	}
+
+	// Broadcast override event
+	event := &EventMessage{
+		Type: "request_overridden",
+		Data: map[string]interface{}{
+			"request_id": requestID,
+			"action":     dbAction,
+		},
+	}
+	h.broadcaster.BroadcastEvent(event)
+
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusOK)
+	json.NewEncoder(w).Encode(map[string]interface{}{
+		"request_id": requestID,
+		"action":     dbAction,
+	})
 }
 
 // Helper functions

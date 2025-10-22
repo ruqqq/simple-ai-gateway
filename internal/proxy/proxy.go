@@ -15,6 +15,7 @@ import (
 	"github.com/andybalholm/brotli"
 	"github.com/ruqqq/simple-ai-gateway/internal/api"
 	"github.com/ruqqq/simple-ai-gateway/internal/database"
+	"github.com/ruqqq/simple-ai-gateway/internal/override"
 	"github.com/ruqqq/simple-ai-gateway/internal/provider"
 	"github.com/ruqqq/simple-ai-gateway/internal/storage"
 )
@@ -99,14 +100,45 @@ func (ph *ProxyHandler) Handle(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Determine approval status based on override mode
+	overrideMgr := override.GetManager()
+	approvalStatus := "approved"
+	if overrideMgr.IsEnabled() {
+		approvalStatus = "pending_approval"
+	}
+
 	// Log the incoming request
-	requestID, reqData, err := ph.logRequest(selectedProvider, r)
+	requestID, reqData, err := ph.logRequestWithStatus(selectedProvider, r, approvalStatus)
 	if err != nil {
 		fmt.Printf("Warning: failed to log request: %v\n", err)
 		// Continue anyway, logging failure shouldn't block proxying
 	} else if reqData != nil {
 		// Emit request created event asynchronously
 		go ph.apiHandler.BroadcastRequestCreated(reqData)
+	}
+
+	// If override mode is enabled, wait for approval
+	if approvalStatus == "pending_approval" {
+		fmt.Printf("Override Mode: Request %s is pending approval (60s timeout)\n", requestID)
+
+		// Broadcast pending approval event so UI shows the banner
+		go ph.apiHandler.BroadcastRequestPendingApproval(requestID, selectedProvider.Name(), selectedProvider.GetProxyURL(r.URL.RequestURI()))
+
+		decision := overrideMgr.WaitForApproval(requestID, 60*time.Second)
+
+		if decision == override.ApprovalTimeout {
+			fmt.Printf("Override Mode: Request %s auto-approved after 60s timeout\n", requestID)
+		}
+
+		// Handle override decisions (error_400, error_500, content_sensitive)
+		// If approved or timeout, continue with normal flow below
+		if decision == override.ApprovalError400 || decision == override.ApprovalError500 || decision == override.ApprovalContentSensitive {
+			ph.handleApprovalDecision(w, selectedProvider, decision, requestID, start)
+			return
+		}
+
+		// For approved or timeout decisions, update DB and continue with normal flow
+		_ = ph.db.ApproveRequest(requestID)
 	}
 
 	// Check if this is a streaming request
@@ -124,6 +156,79 @@ func (ph *ProxyHandler) Handle(w http.ResponseWriter, r *http.Request) {
 		ph.handleStreamingResponse(w, selectedProvider, proxyReq, requestID)
 	} else {
 		ph.handleRegularResponse(w, selectedProvider, proxyReq, requestID, start)
+	}
+}
+
+// handleApprovalDecision handles override decisions and returns canned error responses
+func (ph *ProxyHandler) handleApprovalDecision(w http.ResponseWriter, prov provider.Provider, decision override.ApprovalDecision, requestID string, start time.Time) {
+	var statusCode int
+	var responseBody string
+	var responseHeaders map[string]string
+	var dbAction string
+	var errorType string
+
+	duration := int(time.Since(start).Milliseconds())
+
+	// Handle override decisions (error_400, error_500, content_sensitive)
+	// Approved/Timeout decisions are handled in Handle() before calling this function
+	switch decision {
+	case override.ApprovalError400:
+		statusCode = http.StatusBadRequest
+		errorType = "error_400"
+		responseBody, responseHeaders = provider.GetCannedError(prov.Name(), errorType)
+		dbAction = "error_400"
+
+	case override.ApprovalError500:
+		statusCode = http.StatusInternalServerError
+		errorType = "error_500"
+		responseBody, responseHeaders = provider.GetCannedError(prov.Name(), errorType)
+		dbAction = "error_500"
+
+	case override.ApprovalContentSensitive:
+		statusCode = http.StatusBadRequest
+		errorType = "content_sensitive"
+		responseBody, responseHeaders = provider.GetCannedError(prov.Name(), errorType)
+		dbAction = "content_sensitive"
+
+	default:
+		// Unexpected decision type - treat as 400 error
+		statusCode = http.StatusBadRequest
+		errorType = "error_400"
+		responseBody, responseHeaders = provider.GetCannedError(prov.Name(), errorType)
+		dbAction = "error_400"
+	}
+
+	_ = ph.db.OverrideRequest(requestID, dbAction)
+
+	// Set response headers
+	for key, value := range responseHeaders {
+		w.Header().Set(key, value)
+	}
+
+	// Write status code and body
+	w.WriteHeader(statusCode)
+	_, _ = w.Write([]byte(responseBody))
+
+	// Log the canned response
+	respInput := &database.StoreResponseInput{
+		RequestID:  requestID,
+		StatusCode: statusCode,
+		Headers:    responseHeaders,
+		Body:       responseBody,
+		DurationMs: duration,
+		IsError:    true,
+		ErrorMessage: "Request overridden by override mode",
+	}
+
+	responseID, err := ph.db.StoreResponse(respInput)
+	if err != nil {
+		fmt.Printf("Warning: failed to log override response: %v\n", err)
+	} else {
+		// Retrieve and broadcast response created event
+		resp, err := ph.db.GetResponse(responseID)
+		if err == nil && resp != nil {
+			go ph.apiHandler.BroadcastResponseCreated(resp)
+		}
 	}
 }
 
@@ -238,6 +343,43 @@ func (ph *ProxyHandler) logRequest(prov provider.Provider, r *http.Request) (str
 		Method:   r.Method,
 		Headers:  headers,
 		Body:     string(bodyBytes),
+	}
+
+	id, err := ph.db.StoreRequest(input)
+	if err != nil {
+		return "", nil, err
+	}
+
+	// Retrieve the stored request to get its creation time
+	storedReq, err := ph.db.GetRequest(id)
+	if err != nil {
+		return id, nil, err
+	}
+
+	return id, storedReq, nil
+}
+
+// logRequestWithStatus logs the incoming request to the database with a specified approval status
+func (ph *ProxyHandler) logRequestWithStatus(prov provider.Provider, r *http.Request, approvalStatus string) (string, *database.Request, error) {
+	// Read body
+	bodyBytes, _ := io.ReadAll(r.Body)
+	r.Body = io.NopCloser(bytes.NewBuffer(bodyBytes))
+
+	// Convert headers to map
+	headers := make(map[string]string)
+	for key, values := range r.Header {
+		if len(values) > 0 {
+			headers[key] = values[0]
+		}
+	}
+
+	input := &database.StoreRequestInput{
+		Provider:       prov.Name(),
+		Endpoint:       r.URL.Path,
+		Method:         r.Method,
+		Headers:        headers,
+		Body:           string(bodyBytes),
+		ApprovalStatus: approvalStatus,
 	}
 
 	id, err := ph.db.StoreRequest(input)

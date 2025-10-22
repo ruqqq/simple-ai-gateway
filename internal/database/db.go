@@ -73,6 +73,7 @@ func (db *DB) migrate() error {
 	migrations := []string{
 		"migrations/001_init.sql",
 		"migrations/002_add_error_fields.sql",
+		"migrations/003_add_approval_fields.sql",
 	}
 
 	for _, migrationFile := range migrations {
@@ -149,9 +150,14 @@ func (db *DB) StoreRequest(input *StoreRequestInput) (string, error) {
 		return "", fmt.Errorf("failed to marshal headers: %w", err)
 	}
 
+	approvalStatus := input.ApprovalStatus
+	if approvalStatus == "" {
+		approvalStatus = "approved"
+	}
+
 	_, err = db.conn.Exec(
-		"INSERT INTO requests (id, provider, endpoint, method, headers, body) VALUES (?, ?, ?, ?, ?, ?)",
-		id, input.Provider, input.Endpoint, input.Method, headerJSON, input.Body,
+		"INSERT INTO requests (id, provider, endpoint, method, headers, body, approval_status) VALUES (?, ?, ?, ?, ?, ?, ?)",
+		id, input.Provider, input.Endpoint, input.Method, headerJSON, input.Body, approvalStatus,
 	)
 	if err != nil {
 		return "", fmt.Errorf("failed to store request: %w", err)
@@ -206,14 +212,16 @@ func (db *DB) GetRequest(id string) (*Request, error) {
 	defer db.mu.RUnlock()
 
 	row := db.conn.QueryRow(
-		"SELECT id, provider, endpoint, method, headers, body, created_at FROM requests WHERE id = ?",
+		"SELECT id, provider, endpoint, method, headers, body, approval_status, override_action, approved_at, created_at FROM requests WHERE id = ?",
 		id,
 	)
 
 	var req Request
 	var headerJSON string
+	var overrideAction sql.NullString
+	var approvedAt sql.NullTime
 
-	err := row.Scan(&req.ID, &req.Provider, &req.Endpoint, &req.Method, &headerJSON, &req.Body, &req.CreatedAt)
+	err := row.Scan(&req.ID, &req.Provider, &req.Endpoint, &req.Method, &headerJSON, &req.Body, &req.ApprovalStatus, &overrideAction, &approvedAt, &req.CreatedAt)
 	if err != nil {
 		if err == sql.ErrNoRows {
 			return nil, fmt.Errorf("request not found")
@@ -227,6 +235,13 @@ func (db *DB) GetRequest(id string) (*Request, error) {
 			return nil, fmt.Errorf("failed to unmarshal headers: %w", err)
 		}
 		req.Headers = headers
+	}
+
+	if overrideAction.Valid {
+		req.OverrideAction = &overrideAction.String
+	}
+	if approvedAt.Valid {
+		req.ApprovedAt = &approvedAt.Time
 	}
 
 	return &req, nil
@@ -423,4 +438,36 @@ func (db *DB) GetBinaryFilesByRequestID(requestID string) ([]*BinaryFile, error)
 	}
 
 	return files, nil
+}
+
+// ApproveRequest updates a request's approval status to "approved"
+func (db *DB) ApproveRequest(requestID string) error {
+	db.mu.Lock()
+	defer db.mu.Unlock()
+
+	_, err := db.conn.Exec(
+		"UPDATE requests SET approval_status = ?, approved_at = CURRENT_TIMESTAMP WHERE id = ?",
+		"approved", requestID,
+	)
+	if err != nil {
+		return fmt.Errorf("failed to approve request: %w", err)
+	}
+
+	return nil
+}
+
+// OverrideRequest updates a request's status to "overridden" and sets the override action
+func (db *DB) OverrideRequest(requestID string, action string) error {
+	db.mu.Lock()
+	defer db.mu.Unlock()
+
+	_, err := db.conn.Exec(
+		"UPDATE requests SET approval_status = ?, override_action = ?, approved_at = CURRENT_TIMESTAMP WHERE id = ?",
+		"overridden", action, requestID,
+	)
+	if err != nil {
+		return fmt.Errorf("failed to override request: %w", err)
+	}
+
+	return nil
 }

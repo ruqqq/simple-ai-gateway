@@ -81,6 +81,12 @@ func main() {
 		r.Get("/files/*", apiHandler.GetFile)
 		r.Get("/events", apiHandler.GetEvents)
 		r.Get("/stats", apiHandler.GetStats)
+
+		// Override mode routes
+		r.Post("/override/toggle", apiHandler.ToggleOverride)
+		r.Get("/override/status", apiHandler.GetOverrideStatus)
+		r.Post("/requests/{id}/approve", apiHandler.ApproveRequest)
+		r.Post("/requests/{id}/override", apiHandler.OverrideRequestAction)
 	})
 
 	// UI routes
